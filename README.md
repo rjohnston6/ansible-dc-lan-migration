@@ -15,6 +15,50 @@ Install required collections:
 ansible-galaxy collection install -r requirements.yml
 ```
 
+## Getting Started
+
+### Local Environment Setup with UV
+
+This project uses [uv](https://docs.astral.sh/uv/) for Python dependency management. UV provides fast, reliable package installation and environment management.
+
+**Install UV** (if not already installed):
+```bash
+# macOS/Linux
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Or via Homebrew
+brew install uv
+```
+
+**Setup project environment**:
+```bash
+# Sync dependencies from pyproject.toml
+uv sync
+
+# Activate the virtual environment
+source .venv/bin/activate
+
+# Install Ansible collections
+ansible-galaxy collection install -r requirements.yml
+```
+
+For detailed UV documentation and advanced usage, see [docs/uv-setup.md](docs/uv-setup.md).
+
+### Ansible Vault Configuration
+
+Sensitive credentials are stored using Ansible Vault. You'll need to configure vault encryption for your inventory variables.
+
+**Quick setup**:
+```bash
+# Create vault password file (add to .gitignore)
+echo "your-vault-password" > .vault_pass
+
+# Edit vault file
+ansible-vault edit inventory/group_vars/all/vault.yml
+```
+
+For comprehensive vault usage, encryption strategies, and best practices, see [docs/ansible-vault.md](docs/ansible-vault.md).
+
 ## Project Structure
 
 ```
