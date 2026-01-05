@@ -1,0 +1,72 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual Environments
+.venv/
+venv/
+ENV/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Ansible
+*.retry
+.ansible/
+ansible.log
+*.log
+
+# Ansible Galaxy
+roles/downloaded/
+collections/ansible_collections/
+
+# Vault files (uncomment if you want to exclude)
+# *vault*.yml
+# secrets.yml
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+*.cover
+.hypothesis/
+
+# Temporary files
+*.tmp
+*.bak
+*.orig
+.cache/
+
+# Output directories
+output/
+reports/
+backups/
+configs/
+fabrics/
+source_configs/
+
+# Environment files
+.env
+.env.local
+
+# Documentation builds
+docs/_build/
+site/
+
+# OS files
+Thumbs.db
+.DS_Store

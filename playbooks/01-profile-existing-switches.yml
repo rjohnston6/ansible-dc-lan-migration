@@ -1,0 +1,767 @@
+---
+#==============================================================================
+# Playbook: Profile Existing Switches for NDFC Migration
+#==============================================================================
+# Purpose: Discover and profile existing Cisco NX-OS switches to generate
+#          migration inventory data for Nexus Dashboard Fabric Controller (NDFC)
+#
+# This playbook performs comprehensive discovery and profiling of:
+#   - Switch hardware information (model, serial number, software version)
+#   - VLAN configurations and assignments
+#   - Layer 3 interface configurations (SVIs, loopbacks, routed interfaces)
+#   - Layer 2 interface configurations (access, trunk, port-channels)
+#   - VPC (Virtual Port Channel) configurations
+#   - HSRP (Hot Standby Router Protocol) configurations
+#   - OSPF routing protocol configurations
+#
+# Output Files Generated (per fabric):
+#   - switch_inventory.csv: Switch hardware and migration details
+#   - vlan_database.yml: VLAN definitions and switch assignments
+#   - l3_interfaces.yml: Layer 3 interface configurations
+#   - l2_interfaces.yml: Layer 2 non-VPC interface configurations
+#   - l2_vpc_interfaces.yml: VPC interface configurations (consolidated by vpc_id)
+#
+# Tags:
+#   - profile-switches: Profile switch hardware and basic info
+#   - profile-vlans: Discover VLAN configurations
+#   - profile-l3-interfaces: Profile Layer 3 interfaces, HSRP, OSPF
+#   - profile-l2-interfaces: Profile Layer 2 interfaces, port-channels, VPCs
+#
+# Prerequisites:
+#   - Inventory file (inventory/hosts.yml) with switch definitions
+#   - Network connectivity to all switches via SSH
+#   - Proper credentials configured in inventory or vault
+#
+# Usage Examples:
+#   ansible-playbook 01-profile-existing-switches.yml
+#   ansible-playbook 01-profile-existing-switches.yml --tags profile-vlans
+#   ansible-playbook 01-profile-existing-switches.yml --tags profile-l2-interfaces,profile-l3-interfaces
+#==============================================================================
+
+#------------------------------------------------------------------------------
+# Play 1: Discover and Profile Switch Hardware
+#------------------------------------------------------------------------------
+# Collects basic switch information including:
+#   - Hostname, IP address, management interface
+#   - Hardware model and serial number
+#   - Software version
+#   - Fabric assignment and role (access, aggregation, core, etc.)
+#   - Migration destination info (if migrating to new hardware)
+#
+# Generates: fabrics/<fabric>/switch_inventory.csv
+#------------------------------------------------------------------------------
+- name: Discover Existing Switches and Profile for migration
+  hosts: switches
+  gather_facts: false
+
+  tags:
+    - profile-switches
+
+  tasks:
+
+    # Display which switch is currently being profiled
+    - name: Switches being Profiled
+      debug:
+        msg: "Profiling switch {{ inventory_hostname }} with IP {{ ansible_host }}"
+
+    # Gather comprehensive switch facts using nxos_facts module
+    - name: Get Switch Facts
+      cisco.nxos.nxos_facts:
+      register: switch_facts
+
+    # Optional: Display collected facts for verification
+    - name: Display Switch Facts
+      debug:
+        var: switch_facts.ansible_facts
+
+    # Build structured profile for each switch with hardware and migration details
+    # Migration-related fields (destination_*) are used when replacing old hardware
+    - name: Build switch profile for current host
+      set_fact:
+        switch_profile:
+          hostname: "{{ switch_facts.ansible_facts.ansible_net_hostname }}"
+          ip_address: "{{ ansible_host }}"
+          serial_number: "{{ switch_facts.ansible_facts.ansible_net_serialnum }}"
+          model: "{{ switch_facts.ansible_facts.ansible_net_platform }}"
+          sw_version: "{{ switch_facts.ansible_facts.ansible_net_version }}"
+          fabric: "{{ fabric }}"
+          role: "{{ role }}"
+          migrate: "{{ migrate | default(false) | bool }}"
+          destination_switch_sn: "{{ destination_switch_sn | default(omit) }}"
+          destination_switch_model: "{{ destination_switch_model | default(omit) }}"
+          destination_switch_version: "{{ destination_switch_version | default(omit) }}"
+      when: switch_facts.ansible_facts is defined
+
+    # Collect all switch profiles from all hosts into a single list
+    - name: Aggregate all switch profiles
+      set_fact:
+        all_switch_profiles: "{{ groups['switches'] | map('extract', hostvars, 'switch_profile') | select('defined') | list }}"
+      run_once: true
+      delegate_to: localhost
+    
+    # For migration scenarios: Replace source switch serial/model with destination hardware info
+    # This allows NDFC to recognize the new hardware while preserving the configuration
+    - name: Update serial_number and model for non-migrating switches with destination info
+      set_fact:
+        all_switch_profiles: |
+          {% set updated_profiles = [] %}
+          {% for switch in all_switch_profiles %}
+          {% if not switch.migrate and switch.destination_switch_sn is defined and switch.destination_switch_model is defined and switch.destination_switch_version is defined %}
+          {% set _ = updated_profiles.append(switch | combine({
+            'serial_number': switch.destination_switch_sn,
+            'model': switch.destination_switch_model,
+            'sw_version': switch.destination_switch_version
+          })) %}
+          {% else %}
+          {% set _ = updated_profiles.append(switch) %}
+          {% endif %}
+          {% endfor %}
+          {{ updated_profiles }}
+      run_once: true
+      delegate_to: localhost
+
+    # Group switches by fabric for organized inventory generation
+    - name: Build fabric-grouped inventory with migrate=true switches only
+      set_fact:
+        switch_inventory: >-
+          {{
+          switch_inventory | default([]) + [{
+            'name': item,
+            'switches': all_switch_profiles | selectattr('fabric', 'equalto', item) | list
+          }]
+          }}
+      run_once: true
+      delegate_to: localhost
+      loop: "{{ all_switch_profiles | map(attribute='fabric') | unique | list }}"
+      loop_control:
+        label: "{{ item }}"  
+      
+    - name: Build fabric-grouped inventory with migrate=true switches only
+      set_fact:
+        switch_inventory: >-
+          {{
+            switch_inventory | default([]) + [{
+              'name': item,
+              'switches': all_switch_profiles | selectattr('fabric', 'equalto', item) | list
+            }]
+          }}
+      run_once: true
+      delegate_to: localhost
+      loop: "{{ all_switch_profiles | map(attribute='fabric') | unique | list }}"
+      loop_control:
+        label: "{{ item }}"
+
+    - name: Display fabric inventory structure
+      debug:
+        var: switch_inventory
+      run_once: true
+      delegate_to: localhost
+
+    # Create fabric-specific directories to organize output files
+    - name: Create fabric directories
+      file:
+        path: "../fabrics/{{ item }}"
+        state: directory
+        mode: '0755'
+      run_once: true
+      delegate_to: localhost
+      loop: "{{ all_switch_profiles | map(attribute='fabric') | unique | list }}"
+
+    # Generate CSV file containing switch inventory for each fabric
+    # Used by NDFC for switch discovery and fabric provisioning
+    - name: Generate CSV for each fabric
+      template:
+        src: ../templates/switch_inventory.csv.j2
+        dest: "../fabrics/{{ item.name }}/switch_inventory.csv"
+      run_once: true
+      delegate_to: localhost
+      loop: "{{ switch_inventory }}"
+      loop_control:
+        label: "{{ item.name }}"
+      vars:
+        migration_inventory: "{{ item.switches }}"
+
+#------------------------------------------------------------------------------
+# Play 2: Discover and Profile VLAN Configurations
+#------------------------------------------------------------------------------
+# Profiles VLAN configurations across all switches in each fabric
+# 
+# This play:
+#   - Gathers VLAN definitions (ID, name, state) from each switch
+#   - Consolidates VLANs by fabric (merges duplicate VLANs across switches)
+#   - Tracks which switches have each VLAN configured
+#   - Excludes VLAN 1 (default VLAN)
+#
+# Generates: fabrics/<fabric>/vlan_database.yml
+#------------------------------------------------------------------------------
+- name: Discover VLAN Configurations from all Switches
+  hosts: switches
+  gather_facts: false
+
+  tags:
+    - profile-vlans
+
+  tasks:
+
+    # Gather VLAN information using NX-OS resource module
+    - name: Get VLAN Information
+      cisco.nxos.nxos_vlans:
+        state: gathered
+      register: vlan_info
+
+    # Optional: Display VLAN data for verification
+    - name: Display VLAN Information
+      debug:
+        var: vlan_info
+
+    # Create structured VLAN profile for each switch
+    - name: Build VLAN profile for current host
+      set_fact:
+        vlan_profile:
+          fabric: "{{ fabric }}"
+          switch_ip: "{{ ansible_host }}"
+          vlans: "{{ vlan_info.gathered }}"
+      when: vlan_info.gathered is defined
+
+    # Aggregate VLAN profiles from all switches
+    - name: Aggregate all VLAN profiles
+      set_fact:
+        all_vlan_profiles: "{{ groups['switches'] | map('extract', hostvars, 'vlan_profile') | select('defined') | list }}"
+      run_once: true
+      delegate_to: localhost
+
+    # Consolidate VLANs by fabric - merge duplicate VLANs across switches
+    # Track which switches have each VLAN configured for inventory purposes
+    - name: Build fabric-grouped VLAN database
+      set_fact:
+        vlan_database_str: |
+          {% set db_by_fabric = {} %}
+          {% for profile in all_vlan_profiles %}
+            {% if profile.fabric not in db_by_fabric %}
+              {% set _ = db_by_fabric.update({profile.fabric: {}}) %}
+            {% endif %}
+            {% for vlan in profile.vlans %}
+              {% if vlan.vlan_id != 1 %}
+              {% set vlan_id = vlan.vlan_id | string %}
+              {% if vlan_id not in db_by_fabric[profile.fabric] %}
+                {% set _ = db_by_fabric[profile.fabric].update({vlan_id: {
+                  'vlan_id': vlan.vlan_id,
+                  'name': vlan.name | default('VLAN' + vlan_id),
+                  'enabled': vlan.enabled | default(true),
+                  'state': vlan.state | default('active'),
+                  'switches': [profile.switch_ip]
+                }}) %}
+              {% else %}
+                {% set _ = db_by_fabric[profile.fabric][vlan_id]['switches'].append(profile.switch_ip) %}
+              {% endif %}
+              {% endif %}
+            {% endfor %}
+          {% endfor %}
+          {{ db_by_fabric }}
+      run_once: true
+      delegate_to: localhost
+
+    # Convert YAML string back to dictionary for template processing
+    - name: Convert VLAN database string to dictionary
+      set_fact:
+        vlan_database: "{{ vlan_database_str | from_yaml }}"
+      run_once: true
+      delegate_to: localhost
+
+    # Generate VLAN database YAML file for each fabric
+    - name: Generate VLAN database YAML for each fabric
+      template:
+        src: ../templates/vlan_database.yml.j2
+        dest: "../fabrics/{{ item.key }}/vlan_database.yml"
+      run_once: true
+      delegate_to: localhost
+      loop: "{{ vlan_database | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+      vars:
+        fabric_name: "{{ item.key }}"
+        fabric_vlans: "{{ item.value.values() | list }}"
+
+#------------------------------------------------------------------------------
+# Play 3: Profile Layer 3 Interfaces
+#------------------------------------------------------------------------------
+# Profiles Layer 3 interface configurations including:
+#   - IP addressing (IPv4/IPv6)
+#   - Interface descriptions
+#   - HSRP (Hot Standby Router Protocol) configurations
+#   - OSPF routing protocol configurations
+#   - DHCP relay servers
+#   - SVI (Switched Virtual Interfaces)
+#   - Loopback interfaces
+#   - Routed physical and port-channel interfaces
+#
+# Excludes: VLAN 1 and mgmt0 interfaces
+# Generates: fabrics/<fabric>/l3_interfaces.yml
+#------------------------------------------------------------------------------
+- name: Profile Layer 3 Interfaces
+  hosts: switches
+  gather_facts: false
+
+  tags:
+    - profile-l3-interfaces
+
+  tasks:
+
+    # Gather base interface information including descriptions
+    # nxos_interfaces provides interface descriptions that are not in nxos_l3_interfaces
+    - name: Get basic interface information (including descriptions)
+      cisco.nxos.nxos_interfaces:
+        state: gathered
+      register: base_interface_info
+
+    # Gather Layer 3 interface configurations (IP addresses, etc.)
+    - name: Get Layer 3 Interface Information
+      cisco.nxos.nxos_l3_interfaces:
+        state: gathered
+      register: interface_info
+
+    # - name: Display Layer 3 Interface Information
+    #   debug:
+    #     var: interface_info
+
+    # Gather HSRP configurations for interfaces with redundancy protocols
+    - name: Get HSRP Information
+      cisco.nxos.nxos_hsrp_interfaces:
+        state: gathered
+      register: hsrp_info
+
+    # - name: Display HSRP Information
+    #   debug:
+    #     var: hsrp_info
+    
+    # Gather OSPF routing protocol configurations on interfaces
+    - name: Gather Any OSPF Configured Interfaces
+      cisco.nxos.nxos_ospf_interfaces:
+        state: gathered
+      register: ospf_interfaces_info
+    
+    # - name: Display OSPF Interface Information
+    #   debug:
+    #     var: ospf_interfaces_info
+
+    # Merge L3, HSRP, OSPF, and description data into comprehensive interface profiles
+    # This combines data from multiple NX-OS modules into a single interface record
+    - name: Build interface profile for current host with merged L3 and HSRP data
+      set_fact:
+        interface_profile:
+          fabric: "{{ fabric }}"
+          hostname: "{{ inventory_hostname }}"
+          switch_ip: "{{ ansible_host }}"
+          interfaces: |
+            {%- set merged_interfaces = [] -%}
+            {%- set base_intfs = base_interface_info.gathered | default([]) -%}
+            {%- for l3_iface in interface_info.gathered | default([]) -%}
+              {%- set iface_data = l3_iface | dict2items | items2dict -%}
+              {%- set base_iface = base_intfs | selectattr('name', 'equalto', l3_iface.name) | list -%}
+              {%- if base_iface | length > 0 and base_iface[0].description is defined -%}
+                {%- set _ = iface_data.update({'description': base_iface[0].description}) -%}
+              {%- endif -%}
+              {%- set hsrp_data = hsrp_info.gathered | default([]) | selectattr('name', 'equalto', l3_iface.name) | list -%}
+              {%- if hsrp_data | length > 0 and hsrp_data[0].standby is defined and hsrp_data[0].standby_options is defined -%}
+                {%- set _ = iface_data.update({'hsrp': hsrp_data[0]}) -%}
+              {%- endif -%}
+              {%- set ospf_data = ospf_interfaces_info.gathered | default([]) | selectattr('name', 'equalto', l3_iface.name) | list -%}
+              {%- if ospf_data | length > 0 and ospf_data[0].address_family is defined-%}
+                {%- set _ = iface_data.update({'ospf': ospf_data[0]}) -%}
+              {%- endif -%}
+              {%- set _ = merged_interfaces.append(iface_data) -%}
+            {%- endfor -%}
+            {{ merged_interfaces }}
+      when: interface_info.gathered is defined
+
+    - name: Aggregate all interface profiles
+      set_fact:
+        all_interface_profiles: "{{ groups['switches'] | map('extract', hostvars, 'interface_profile') | select('defined') | list }}"
+      run_once: true
+      delegate_to: localhost
+
+    - name: Display all interface profiles
+      debug:
+        var: all_interface_profiles
+      run_once: true
+      delegate_to: localhost
+        
+    - name: Build fabric-grouped interface inventory excluding VLAN 1 interfaces
+      set_fact:
+        interface_inventory: >-
+          {% set iface_by_fabric = {} %}
+          {% for profile in all_interface_profiles %}
+            {% if profile.fabric not in iface_by_fabric %}
+              {% set _ = iface_by_fabric.update({profile.fabric: {}}) %}
+            {% endif %}
+            {% if profile.hostname not in iface_by_fabric[profile.fabric] %}
+              {% set _ = iface_by_fabric[profile.fabric].update({profile.hostname: {}}) %}
+              {% set _ = iface_by_fabric[profile.fabric][profile.hostname].update({'interfaces': []}) %}
+            {% endif %}
+            {% for iface in profile.interfaces %}
+              {% if iface.name != 'Vlan1' and iface.name != 'mgmt0' %}
+                {% if iface.ipv4 is defined %}
+                  {% set iface_type = 'eth' %}
+                  {% if iface.name.startswith('Vlan') %}
+                    {% set iface_type = 'svi' %}
+                  {% elif iface.name.startswith('loopback') %}
+                    {% set iface_type = 'lo' %}
+                  {% elif iface.name.startswith('port-channel') %}
+                    {% set iface_type = 'pc' %}
+                  {% endif %}
+                  {% set iface_data = { 
+                    'interface': iface.name,
+                    'type': iface_type,
+                    'enabled': iface.enabled | default(true),
+                    'ipv4_address': iface.ipv4[0].address | default(''),
+                  } %}
+                  {% if iface.description is defined %}
+                    {% set _ = iface_data.update({'description': iface.description}) %}
+                  {% endif %}
+                  {% if iface.redirects is defined %}
+                    {% set _ = iface_data.update({'ipv4_redirects': iface.redirects}) %}
+                  {% endif %}
+                  {% if iface.ipv6 is defined %}
+                    {% set _ = iface_data.update({'ipv6_address': iface.ipv6[0].address}) %}
+                  {% endif %}
+                  {% if iface.ipv6_redirects is defined %}
+                    {% set _ = iface_data.update({'ipv6_redirects': iface.ipv6[0].redirects}) %}
+                  {% endif %}
+                  {% if iface.dhcp.ipv4.relay is defined %}
+                    {% if iface.dhcp.ipv4.relay.address[0] is defined %}
+                      {% set _ = iface_data.update({'dhcp_server_add1': iface.dhcp.ipv4.relay.address[0].relay_ip}) %}
+                    {% endif %}
+                    {% if iface.dhcp.ipv4.relay.address[1] is defined %}
+                      {% set _ = iface_data.update({'dhcp_server_add2': iface.dhcp.ipv4.relay.address[1].relay_ip}) %}
+                    {% endif %}
+                    {% if iface.dhcp.ipv4.relay.address[2] is defined %}
+                      {% set _ = iface_data.update({'dhcp_server_add3': iface.dhcp.ipv4.relay.address[2].relay_ip}) %}
+                    {% endif %}
+                  {% endif %}
+                  {% if iface.hsrp is defined %}
+                    {% set _ = iface_data.update({
+                      'hsrp_group': iface.hsrp.standby_options[0].group_no | default(''),
+                      'hsrp_version': iface.hsrp.standby.version | default(''),
+                      'hsrp_virtual_ip': iface.hsrp.standby_options[0].ip[0].virtual_ip | default(''),
+                    }) %}
+                    {% if iface.hsrp.standby_options[0].priority is defined %}
+                      {% set _ = iface_data.update({'hsrp_priority': iface.hsrp.standby_options[0].priority.level | default('')}) %}
+                    {% endif %}
+                  {% endif %}
+                  {% if iface.ospf is defined %}
+                    {% set _ = iface_data.update({
+                      'ospf_area': iface.ospf.address_family[0].processes[0].area.area_id | default(''),
+                      'ospf_process': iface.ospf.address_family[0].processes[0].process_id | default(''),
+                    }) %}
+                  {% endif %}
+                  {% set _ = iface_by_fabric[profile.fabric][profile.hostname]['interfaces'].append(iface_data) %}
+                {% endif %}
+              {% endif %}
+            {% endfor %}
+          {% endfor %}
+          {{ iface_by_fabric }}
+      run_once: true
+      delegate_to: localhost
+      
+    # - name: Display fabric Interfaces
+    #   debug:
+    #     msg: "{{ interface_inventory | from_yaml}}"
+    #   run_once: true
+    #   delegate_to: localhost
+
+    - name: Generate L3 interfaces inventory YAML for each fabric
+      template:
+        src: ../templates/interfaces_inventory.yml.j2
+        dest: "../fabrics/{{ item.key }}/l3_interfaces.yml"
+      run_once: true
+      delegate_to: localhost
+      loop: "{{ (interface_inventory | from_yaml) | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+      vars:
+        fabric_name: "{{ item.key }}"
+        fabric_interfaces: "{{ item.value }}"
+
+#------------------------------------------------------------------------------
+# Play 4: Profile Layer 2 Interfaces
+#------------------------------------------------------------------------------
+# Profiles Layer 2 interface configurations including:
+#   - Access ports with VLAN assignments
+#   - Trunk ports with allowed VLANs and native VLAN
+#   - Port-channels (both VPC and non-VPC)
+#   - Port-channel member interfaces
+#   - VPC (Virtual Port Channel) configurations
+#   - Interface descriptions
+#
+# VPC Consolidation:
+#   VPC interfaces are consolidated by vpc_id, meaning interfaces with the
+#   same VPC ID on different switches are grouped together for dual-homing
+#
+# Excludes: VLAN 1, mgmt0, VPC peer-link, and port-channel members
+# Generates:
+#   - fabrics/<fabric>/l2_interfaces.yml (non-VPC L2 interfaces)
+#   - fabrics/<fabric>/l2_vpc_interfaces.yml (VPC interfaces consolidated)
+#------------------------------------------------------------------------------
+- name: Profile Layer 2 Interfaces
+  hosts: switches
+  gather_facts: false
+
+  tags:
+    - profile-l2-interfaces
+
+  tasks:
+
+    # Gather base interface information for descriptions
+    - name: Get basic interface information (including descriptions)
+      cisco.nxos.nxos_interfaces:
+        state: gathered
+      register: base_interface_info
+
+    # Gather Layer 2 interface configurations (mode, VLANs, trunk settings)
+    - name: Get Layer 2 Interface Information
+      cisco.nxos.nxos_l2_interfaces:
+        state: gathered
+      register: l2_interface_info
+
+    - name: Display Layer 2 Interface Information
+      debug:
+        var: l2_interface_info
+
+    # Create simple L2 profile for aggregation (will be consolidated later with port-channel data)
+    - name: Build L2 interface profile for current host
+      set_fact:
+        l2_interface_profile:
+          fabric: "{{ fabric }}"
+          hostname: "{{ inventory_hostname }}"
+          switch_ip: "{{ ansible_host }}"
+          interfaces: "{{ l2_interface_info.gathered }}"
+      when: l2_interface_info.gathered is defined
+
+    - name: Aggregate all L2 interface profiles
+      set_fact:
+        all_l2_interface_profiles: "{{ groups['switches'] | map('extract', hostvars, 'l2_interface_profile') | select('defined') | list }}"
+      run_once: true
+      delegate_to: localhost
+
+    - name: Display all L2 interface profiles
+      debug:
+        var: all_l2_interface_profiles
+      run_once: true
+      delegate_to: localhost
+
+    # Gather port-channel and LACP configurations for link aggregation
+    - name: Get port-channel Information
+      cisco.nxos.facts:
+        gather_subset: min
+        gather_network_resources:
+          - lag_interfaces
+          - lacp_interfaces
+      register: portchannel_info
+    
+    - name: Display port-channel Information
+      debug:
+        var: portchannel_info
+    
+    - name: Check if VPC is configured
+      cisco.nxos.nxos_command:
+        commands:
+          - show vpc
+      register: vpc_info_raw
+      ignore_errors: true
+      when: role is defined and role in ['aggregation', 'spine', 'leaf']
+
+    # - name: Display VPC Information
+    #   debug:
+    #     var: vpc_info_raw
+    #   when: vpc_info_raw is defined
+
+    - name: Parse VPC port-channel mappings
+      set_fact:
+        vpc_portchannels: |
+          {%- set vpc_pcs = [] -%}
+          {%- if vpc_info_raw is defined and vpc_info_raw.stdout is defined and vpc_info_raw.stdout | length > 0 -%}
+            {%- for line in vpc_info_raw.stdout[0].split('\n') -%}
+              {%- if line | regex_search('^(\\d+)\\s+(Po\\d+)\\s+\\w+\\s+success') -%}
+                {%- set parts = line.split() -%}
+                {%- set _ = vpc_pcs.append({'vpc_id': parts[0], 'port_channel': parts[1] | replace('Po', 'port-channel'), 'status': parts[2]}) -%}
+              {%- endif -%}
+            {%- endfor -%}
+          {%- endif -%}
+          {{ vpc_pcs }}
+      when: vpc_info_raw is defined and not vpc_info_raw.skipped | default(false)
+
+    - name: Display VPC port-channel mappings
+      debug:
+        var: vpc_portchannels
+      when: vpc_portchannels is defined
+
+    - name: Build consolidated L2 interface inventory with port-channel members
+      set_fact:
+        l2_interface_profile_consolidated:
+          fabric: "{{ fabric }}"
+          hostname: "{{ inventory_hostname }}"
+          switch_ip: "{{ ansible_host }}"
+          interfaces: |
+            {%- set consolidated = [] -%}
+            {%- set lag_members = [] -%}
+            {%- set peer_link_names = [] -%}
+            {%- set lag_info = portchannel_info.ansible_facts.ansible_network_resources.lag_interfaces | default([]) -%}
+            {%- set vpc_pc_names = vpc_portchannels | default([]) | map(attribute='port_channel') | list -%}
+            {%- set base_intfs = base_interface_info.gathered | default([]) -%}
+            {%- for lag in lag_info -%}
+              {%- if lag.name not in vpc_pc_names and vpc_pc_names | length > 0 -%}
+                {%- set _ = peer_link_names.append(lag.name) -%}
+              {%- endif -%}
+              {%- for member in lag.members | default([]) -%}
+                {%- set _ = lag_members.append(member.member) -%}
+              {%- endfor -%}
+            {%- endfor -%}
+            {%- for iface in l2_interface_info.gathered | default([]) -%}
+              {%- if iface.name not in lag_members and iface.name not in peer_link_names and iface.name != 'Vlan1' and iface.name != 'mgmt0' -%}
+                {%- set iface_data = iface | dict2items | items2dict -%}
+                {%- set base_iface = base_intfs | selectattr('name', 'equalto', iface.name) | list -%}
+                {%- if base_iface | length > 0 and base_iface[0].description is defined -%}
+                  {%- set _ = iface_data.update({'description': base_iface[0].description}) -%}
+                {%- endif -%}
+                {%- set iface_type = 'eth' -%}
+                {%- if iface.name.startswith('Vlan') -%}
+                  {%- set iface_type = 'svi' -%}
+                {%- elif iface.name.startswith('loopback') -%}
+                  {%- set iface_type = 'lo' -%}
+                {%- elif iface.name.startswith('port-channel') -%}
+                  {%- set iface_type = 'pc' -%}
+                {%- endif -%}
+                {%- set has_config = false -%}
+                {%- if iface.mode is defined or iface.trunk is defined or iface.access is defined or iface.cdp_enable is defined -%}
+                  {%- set has_config = true -%}
+                {%- endif -%}
+                {%- set matching_lag = lag_info | selectattr('name', 'equalto', iface.name) | list -%}
+                {%- if matching_lag | length > 0 -%}
+                  {%- set has_config = true -%}
+                  {%- set _ = iface_data.update({'members': matching_lag[0].members | default([])}) -%}
+                  {%- set vpc_match = vpc_portchannels | default([]) | selectattr('port_channel', 'equalto', iface.name) | list -%}
+                  {%- if vpc_match | length > 0 -%}
+                    {%- set iface_type = 'vpc' -%}
+                    {%- set _ = iface_data.update({'vpc_id': vpc_match[0].vpc_id}) -%}
+                  {%- endif -%}
+                {%- endif -%}
+                {%- set _ = iface_data.update({'type': iface_type}) -%}
+                {%- if has_config -%}
+                  {%- set _ = consolidated.append(iface_data) -%}
+                {%- endif -%}
+              {%- endif -%}
+            {%- endfor -%}
+            {{ consolidated }}
+      when: l2_interface_info.gathered is defined
+
+    - name: Aggregate all consolidated L2 interface profiles
+      set_fact:
+        all_l2_consolidated_profiles: "{{ groups['switches'] | map('extract', hostvars, 'l2_interface_profile_consolidated') | select('defined') | list }}"
+      run_once: true
+      delegate_to: localhost
+
+    - name: Display all consolidated L2 interface profiles
+      debug:
+        var: all_l2_consolidated_profiles
+      run_once: true
+      delegate_to: localhost
+
+    - name: Build fabric-grouped consolidated L2 interface inventory
+      set_fact:
+        l2_interface_inventory: |
+          {%- set iface_by_fabric = {} -%}
+          {%- for profile in all_l2_consolidated_profiles -%}
+            {%- if profile.fabric not in iface_by_fabric -%}
+              {%- set _ = iface_by_fabric.update({profile.fabric: {}}) -%}
+            {%- endif -%}
+            {%- set non_vpc_interfaces = [] -%}
+            {%- for iface in profile.interfaces -%}
+              {%- if iface.type != 'vpc' -%}
+                {%- set _ = non_vpc_interfaces.append(iface) -%}
+              {%- endif -%}
+            {%- endfor -%}
+            {%- if non_vpc_interfaces | length > 0 -%}
+              {%- set _ = iface_by_fabric[profile.fabric].update({profile.hostname: {'interfaces': non_vpc_interfaces}}) -%}
+            {%- endif -%}
+          {%- endfor -%}
+          {{ iface_by_fabric }}
+      run_once: true
+      delegate_to: localhost
+
+    - name: Display fabric-grouped L2 interface inventory
+      debug:
+        var: l2_interface_inventory
+      run_once: true
+      delegate_to: localhost
+
+    - name: Consolidate VPC interfaces by vpc_id across switches
+      set_fact:
+        l2_interface_inventory_vpc_consolidated: |
+          {%- set consolidated_by_fabric = {} -%}
+          {%- for profile in all_l2_consolidated_profiles -%}
+            {%- set fabric = profile.fabric -%}
+            {%- if fabric not in consolidated_by_fabric -%}
+              {%- set _ = consolidated_by_fabric.update({fabric: {'vpc_groups': {}}}) -%}
+            {%- endif -%}
+            {%- for iface in profile.interfaces -%}
+              {%- if iface.type == 'vpc' and iface.vpc_id is defined -%}
+                {%- set vpc_key = iface.vpc_id | string -%}
+                {%- if vpc_key not in consolidated_by_fabric[fabric]['vpc_groups'] -%}
+                  {%- set _ = consolidated_by_fabric[fabric]['vpc_groups'].update({vpc_key: {
+                    'name': iface.name,
+                    'type': 'vpc',
+                    'vpc_id': iface.vpc_id,
+                    'mode': iface.mode,
+                    'trunk': iface.trunk | default({}),
+                    'access': iface.access | default({}),
+                    'switches': [],
+                    'members': {}
+                  }}) -%}
+                  {%- if iface.description is defined -%}
+                    {%- set _ = consolidated_by_fabric[fabric]['vpc_groups'][vpc_key].update({'description': iface.description}) -%}
+                  {%- endif -%}
+                {%- endif -%}
+                {%- set _ = consolidated_by_fabric[fabric]['vpc_groups'][vpc_key]['switches'].append(profile.hostname) -%}
+                {%- set _ = consolidated_by_fabric[fabric]['vpc_groups'][vpc_key]['members'].update({profile.hostname: iface.members | default([])}) -%}
+              {%- endif -%}
+            {%- endfor -%}
+          {%- endfor -%}
+          {%- set final_output = {} -%}
+          {%- for fabric, data in consolidated_by_fabric.items() -%}
+            {%- set _ = final_output.update({fabric: {'vpc_interfaces': data['vpc_groups'].values() | list}}) -%}
+          {%- endfor -%}
+          {{ final_output }}
+      run_once: true
+      delegate_to: localhost
+
+    - name: Display VPC consolidated inventory
+      debug:
+        var: l2_interface_inventory_vpc_consolidated
+      run_once: true
+      delegate_to: localhost
+
+    - name: Generate VPC consolidated inventory YAML for each fabric
+      template:
+        src: ../templates/vpc_inventory.yml.j2
+        dest: "../fabrics/{{ item.key }}/l2_vpc_interfaces.yml"
+      run_once: true
+      delegate_to: localhost
+      loop: "{{ (l2_interface_inventory_vpc_consolidated | from_yaml) | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+      vars:
+        fabric_name: "{{ item.key }}"
+        fabric_vpc_interfaces: "{{ item.value.vpc_interfaces }}"
+
+    - name: Generate L2 interfaces inventory YAML for each fabric
+      template:
+        src: ../templates/interfaces_inventory.yml.j2
+        dest: "../fabrics/{{ item.key }}/l2_interfaces.yml"
+      run_once: true
+      delegate_to: localhost
+      loop: "{{ l2_interface_inventory | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+      vars:
+        fabric_name: "{{ item.key }}"
+        fabric_interfaces: "{{ item.value }}"

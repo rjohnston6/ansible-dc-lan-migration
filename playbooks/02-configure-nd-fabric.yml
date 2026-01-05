@@ -1,0 +1,98 @@
+---
+# Playbook: 02-configure-nd-fabric.yml
+# Purpose: Deploy fabric configurations to Nexus Dashboard (ND)
+#
+# Description:
+#   This playbook manages fabric creation on Nexus Dashboard by:
+#   1. Retrieving currently configured fabrics from ND
+#   2. Comparing with desired fabric definitions from host_vars
+#   3. Creating only new fabrics that don't already exist
+#   4. Skipping fabrics that are already configured
+#
+# Variables Required:
+#   - nd_fabrics: List of fabric definitions from host_vars/nexus_dashboard/fabric_definitions.yml
+#                 Each fabric should contain FABRIC_NAME and configuration parameters
+#   - ansible_host: Nexus Dashboard IP address
+#   - ansible_user: ND username
+#   - ansible_ssh_pass: ND password
+#   - ansible_httpapi_use_ssl: Use SSL for API calls (typically true)
+#   - ansible_httpapi_validate_certs: Validate SSL certificates (typically false for lab)
+#   - ansible_httpapi_use_proxy: Use proxy for API calls (typically false)
+#
+# API Endpoints Used:
+#   - GET /api/v1/manage/fabrics: Retrieve existing fabrics
+#   - POST /api/v1/manage/fabrics: Create new fabrics
+#
+# Templates Used:
+#   - create_fabric.json.j2: Jinja2 template that converts fabric variables to ND API JSON format
+#
+# Tags:
+#   - configure-fabrics: Run only fabric configuration tasks
+#
+# Example Usage:
+#   ansible-playbook ./playbooks/02-configure-nd-fabric.yml
+#   ansible-playbook ./playbooks/02-configure-nd-fabric.yml --tags configure-fabrics
+
+- name: Deploy Fabric Configuration to Nexus Dashboard
+  hosts: nexus_dashboard
+  gather_facts: false
+
+  tags:
+    - configure-fabrics
+
+  tasks:
+
+    # Task 1: Query ND for existing fabrics to prevent duplicate creation
+    - name: Get Currently Configured Fabrics
+      cisco.nd.nd_rest:
+        host: "{{ ansible_host }}"
+        username: "{{ ansible_user }}"
+        password: "{{ ansible_ssh_pass }}"
+        use_ssl: "{{ ansible_httpapi_use_ssl }}"
+        validate_certs: "{{ ansible_httpapi_validate_certs }}"
+        use_proxy: "{{ ansible_httpapi_use_proxy }}"
+        login_domain: "{{ ansible_httpapi_login_domain | default('local') }}"
+        path: /api/v1/manage/fabrics
+        method: GET
+      register: existing_fabrics
+
+    # Task 2: Show which fabrics are already configured on ND
+    - name: Display Existing Fabrics
+      debug:
+        msg: 
+          - "Currently configured fabrics:"
+          - "{{ existing_fabrics.current.fabrics | map(attribute='name') | list }}"
+
+    # Task 3: Filter nd_fabrics to only include fabrics not already on ND
+    # This prevents errors from attempting to create duplicate fabrics
+    - name: Create List of Fabrics to Deploy
+      set_fact:
+        existing_fabric_names: "{{ existing_fabrics.current.fabrics | map(attribute='name') | list }}"
+        fabrics_to_deploy: "{{ nd_fabrics | rejectattr('FABRIC_NAME', 'in', existing_fabrics.current.fabrics | map(attribute='name') | list) | list }}"
+
+    # Task 4: Show which fabrics will be created (empty list if all exist)
+    - name: Display Fabrics to Deploy
+      debug:
+        msg:
+          - "Fabrics to be deployed:"
+          - "{{ fabrics_to_deploy | map(attribute='FABRIC_NAME') | list }}"
+
+    # Task 5: Create new fabrics on ND using REST API
+    # Only runs for fabrics in fabrics_to_deploy list
+    # Uses Jinja2 template to transform fabric variables into ND API JSON format
+    - name: Configure Fabrics in Nexus Dashboard
+      cisco.nd.nd_rest:
+        host: "{{ ansible_host }}"
+        username: "{{ ansible_user }}"
+        password: "{{ ansible_ssh_pass }}"
+        use_ssl: "{{ ansible_httpapi_use_ssl }}"
+        validate_certs: "{{ ansible_httpapi_validate_certs }}"
+        use_proxy: "{{ ansible_httpapi_use_proxy }}"
+        login_domain: "{{ ansible_httpapi_login_domain | default('local') }}"
+        path: /api/v1/manage/fabrics
+        method: POST
+        content: "{{ lookup('template', '../templates/create_fabric.json.j2') }}"
+      loop: "{{ fabrics_to_deploy }}"
+      register: fabric_config_result
+
+#  TODO add a step that can do Update to an existing fabric using PUT

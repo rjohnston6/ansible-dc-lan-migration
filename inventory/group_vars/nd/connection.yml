@@ -1,0 +1,18 @@
+---
+ansible_network_os: cisco.nd.nd
+ansible_connection: ansible.netcommon.httpapi
+ansible_httpapi_use_ssl: true
+ansible_httpapi_validate_certs: false
+ansible_httpapi_use_proxy: false
+
+# Login Information
+ansible_user: admin
+ansible_ssh_pass: "{{ vault_nd_password }}"
+
+# Set higher timeouts to support DCNM modules
+ansible_command_timeout: 1000
+ansible_connect_timeout: 1000
+
+# Switch Username and Password for ND to use when connecting to switches
+nd_switch_username: ndfc
+nd_switch_password: "{{ vault_switch_password }}"

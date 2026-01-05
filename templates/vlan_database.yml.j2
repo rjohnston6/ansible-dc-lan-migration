@@ -1,0 +1,15 @@
+---
+# VLAN Database for Fabric: {{ fabric_name }}
+# Auto-generated from switch configurations
+
+vlans:
+{% for vlan in fabric_vlans | sort(attribute='vlan_id') %}
+  - vlan_id: {{ vlan.vlan_id }}
+    name: {{ vlan.name }}
+    enabled: {{ vlan.enabled | lower }}
+    state: {{ vlan.state }}
+    switches:
+{% for switch_ip in vlan.switches | sort %}
+      - {{ switch_ip }}
+{% endfor %}
+{% endfor %}
