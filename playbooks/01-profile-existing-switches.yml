@@ -645,6 +645,7 @@
                   {%- if vpc_match | length > 0 -%}
                     {%- set iface_type = 'vpc' -%}
                     {%- set _ = iface_data.update({'vpc_id': vpc_match[0].vpc_id}) -%}
+                    {%- set has_config = true -%}
                   {%- endif -%}
                 {%- endif -%}
                 {%- set _ = iface_data.update({'type': iface_type}) -%}
