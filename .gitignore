@@ -1,4 +1,4 @@
-# Python
+git rm --cached -r source_configs/# Python
 __pycache__/
 *.py[cod]
 *$py.class
