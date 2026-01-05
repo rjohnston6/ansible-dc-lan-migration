@@ -421,10 +421,10 @@
                   {% if iface.redirects is defined %}
                     {% set _ = iface_data.update({'ipv4_redirects': iface.redirects}) %}
                   {% endif %}
-                  {% if iface.ipv6 is defined %}
+                  {% if iface.ipv6 is defined and iface.ipv6 | length > 0 %}
                     {% set _ = iface_data.update({'ipv6_address': iface.ipv6[0].address}) %}
                   {% endif %}
-                  {% if iface.ipv6_redirects is defined %}
+                  {% if iface.ipv6 is defined and iface.ipv6 | length > 0 and iface.ipv6[0].redirects is defined %}
                     {% set _ = iface_data.update({'ipv6_redirects': iface.ipv6[0].redirects}) %}
                   {% endif %}
                   {% if iface.dhcp.ipv4.relay is defined %}
