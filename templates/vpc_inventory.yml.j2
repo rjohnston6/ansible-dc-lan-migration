@@ -33,6 +33,9 @@ vpc_interfaces:
   - name: {{ vpc.name }}
     type: {{ vpc.type }}
     vpc_id: {{ vpc.vpc_id }}
+{% if vpc.state is defined %}
+    state: {{ vpc.state }}
+{% endif %}
     switches:
 {% for switch in vpc.switches %}
       - {{ switch }}

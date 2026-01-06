@@ -90,6 +90,7 @@
           destination_switch_sn: "{{ destination_switch_sn | default(omit) }}"
           destination_switch_model: "{{ destination_switch_model | default(omit) }}"
           destination_switch_version: "{{ destination_switch_version | default(omit) }}"
+          destination_switch_ip_addr: "{{ destination_switch_ip_addr | default(omit) }}"
       when: switch_facts.ansible_facts is defined
 
     # Collect all switch profiles from all hosts into a single list
@@ -108,6 +109,7 @@
           {% for switch in all_switch_profiles %}
           {% if not switch.migrate and switch.destination_switch_sn is defined and switch.destination_switch_model is defined and switch.destination_switch_version is defined %}
           {% set _ = updated_profiles.append(switch | combine({
+            'ip_address': switch.destination_switch_ip_addr,
             'serial_number': switch.destination_switch_sn,
             'model': switch.destination_switch_model,
             'sw_version': switch.destination_switch_version
@@ -219,7 +221,7 @@
       set_fact:
         vlan_profile:
           fabric: "{{ fabric }}"
-          switch_ip: "{{ ansible_host }}"
+          switch_ip: "{{ destination_switch_ip_addr if (not (migrate | default(false) | bool)) and destination_switch_ip_addr is defined else ansible_host }}"
           vlans: "{{ vlan_info.gathered }}"
       when: vlan_info.gathered is defined
 
@@ -351,7 +353,7 @@
         interface_profile:
           fabric: "{{ fabric }}"
           hostname: "{{ inventory_hostname }}"
-          switch_ip: "{{ ansible_host }}"
+          switch_ip: "{{ destination_switch_ip_addr if (not (migrate | default(false) | bool)) and destination_switch_ip_addr is defined else ansible_host }}"
           interfaces: |
             {%- set merged_interfaces = [] -%}
             {%- set base_intfs = base_interface_info.gathered | default([]) -%}
@@ -533,7 +535,7 @@
         l2_interface_profile:
           fabric: "{{ fabric }}"
           hostname: "{{ inventory_hostname }}"
-          switch_ip: "{{ ansible_host }}"
+          switch_ip: "{{ destination_switch_ip_addr if (not (migrate | default(false) | bool)) and destination_switch_ip_addr is defined else ansible_host }}"
           interfaces: "{{ l2_interface_info.gathered }}"
       when: l2_interface_info.gathered is defined
 
@@ -581,7 +583,7 @@
           {%- set vpc_pcs = [] -%}
           {%- if vpc_info_raw is defined and vpc_info_raw.stdout is defined and vpc_info_raw.stdout | length > 0 -%}
             {%- for line in vpc_info_raw.stdout[0].split('\n') -%}
-              {%- if line | regex_search('^(\\d+)\\s+(Po\\d+)\\s+\\w+\\s+success') -%}
+              {%- if line | regex_search('^(\\d+)\\s+(Po\\d+)\\s+\\w+') -%}
                 {%- set parts = line.split() -%}
                 {%- set _ = vpc_pcs.append({'vpc_id': parts[0], 'port_channel': parts[1] | replace('Po', 'port-channel'), 'status': parts[2]}) -%}
               {%- endif -%}
@@ -600,7 +602,7 @@
         l2_interface_profile_consolidated:
           fabric: "{{ fabric }}"
           hostname: "{{ inventory_hostname }}"
-          switch_ip: "{{ ansible_host }}"
+          switch_ip: "{{ destination_switch_ip_addr if (not (migrate | default(false) | bool)) and destination_switch_ip_addr is defined else ansible_host }}"
           interfaces: |
             {%- set consolidated = [] -%}
             {%- set lag_members = [] -%}
@@ -646,6 +648,9 @@
                   {%- endif -%}
                 {%- endif -%}
                 {%- set _ = iface_data.update({'type': iface_type}) -%}
+                {%- if not (migrate | default(false) | bool) -%}
+                  {%- set _ = iface_data.update({'state': 'override'}) -%}
+                {%- endif -%}
                 {%- if has_config -%}
                   {%- set _ = consolidated.append(iface_data) -%}
                 {%- endif -%}
@@ -704,10 +709,14 @@
               {%- set _ = consolidated_by_fabric.update({fabric: {'vpc_groups': {}}}) -%}
             {%- endif -%}
             {%- for iface in profile.interfaces -%}
-              {%- if iface.type == 'vpc' and iface.vpc_id is defined -%}
+              {%- set is_peer_link = false -%}
+              {%- if iface.description is defined and 'peer-link' in iface.description | lower -%}
+                {%- set is_peer_link = true -%}
+              {%- endif -%}
+              {%- if iface.type == 'vpc' and iface.vpc_id is defined and not is_peer_link -%}
                 {%- set vpc_key = iface.vpc_id | string -%}
                 {%- if vpc_key not in consolidated_by_fabric[fabric]['vpc_groups'] -%}
-                  {%- set _ = consolidated_by_fabric[fabric]['vpc_groups'].update({vpc_key: {
+                  {%- set vpc_config = {
                     'name': iface.name,
                     'type': 'vpc',
                     'vpc_id': iface.vpc_id,
@@ -716,10 +725,14 @@
                     'access': iface.access | default({}),
                     'switches': [],
                     'members': {}
-                  }}) -%}
+                  } -%}
                   {%- if iface.description is defined -%}
-                    {%- set _ = consolidated_by_fabric[fabric]['vpc_groups'][vpc_key].update({'description': iface.description}) -%}
+                    {%- set _ = vpc_config.update({'description': iface.description}) -%}
                   {%- endif -%}
+                  {%- if iface.state is defined -%}
+                    {%- set _ = vpc_config.update({'state': iface.state}) -%}
+                  {%- endif -%}
+                  {%- set _ = consolidated_by_fabric[fabric]['vpc_groups'].update({vpc_key: vpc_config}) -%}
                 {%- endif -%}
                 {%- set _ = consolidated_by_fabric[fabric]['vpc_groups'][vpc_key]['switches'].append(profile.hostname) -%}
                 {%- set _ = consolidated_by_fabric[fabric]['vpc_groups'][vpc_key]['members'].update({profile.hostname: iface.members | default([])}) -%}

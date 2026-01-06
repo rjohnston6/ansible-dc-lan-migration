@@ -29,14 +29,15 @@
   switch: {{ vpc_interface.switches }}
   type: {{ vpc_interface.type }}
   deploy: true
+  state: {{ vpc_interface.state | default('merged') }}
   admin_state: true
   profile:
 {% if vpc_interface.mtu is defined %}
-{% if vpc_interface.mtu == 1500 %}
+{%   if vpc_interface.mtu == 1500 %}
     mtu: "default"
-{% elif vpc_interface.mtu >= 9000 %}
+{%   elif vpc_interface.mtu >= 9000 %}
     mtu: "jumbo"
-{% endif %}
+{%   endif %}
 {% else %}
     mtu: "default"
 {% endif %}
@@ -60,25 +61,37 @@
 {% if vpc_interface.description is defined %}
     description: "{{ vpc_interface.description }}"
 {% endif %}
+{% if vpc_interface.lacp_suspend is defined %}
+    disable_lacp_suspend_individual: {{ vpc_interface.lacp_suspend }}
+{% else %}
+    disable_lacp_suspend_individual: false
+{% endif %}
+{#================ Port-Channel Member Interfaces =================#}
+{# Member interfaces are assigned per peer switch #}
+{#===============================================================#}
+{# Note: Members are defined as a dictionary mapping switch names to lists #}
+{# of member interfaces. We extract members for peer1 and peer2 based on #}
+{# the order of switches in the 'switches' list. #}
+{#===============================================================#}
 {# VPC configuration - same VPC ID applied to both peers #}
-  peer1_pcid: {{ vpc_interface.vpc_id }}
-  peer2_pcid: {{ vpc_interface.vpc_id }}
-  vpc_id: {{ vpc_interface.vpc_id }}
+    peer1_pcid: {{ vpc_interface.vpc_id }}
+    peer2_pcid: {{ vpc_interface.vpc_id }}
+    vpc_id: {{ vpc_interface.vpc_id }}
 {# Port-channel member interfaces assigned per peer switch #}
 {% if vpc_interface.members is defined %}
-{% set switch_list = vpc_interface.switches %}
-{% if switch_list | length >= 1 %}
-{% set peer1_members = vpc_interface.members[switch_list[0]] | default([]) %}
+{%   set switch_list = vpc_interface.switches %}
+{%   if switch_list | length >= 1 %}
+{%     set peer1_members = vpc_interface.members[switch_list[0]] | default([]) %}
     peer1_members:
-{% for member in peer1_members %}
+{%     for member in peer1_members %}
       - {{ member.interface }}
-{% endfor %}
-{% endif %}
-{% if switch_list | length >= 2 %}
-{% set peer2_members = vpc_interface.members[switch_list[1]] | default([]) %}
+{%     endfor %}
+{%   endif %}
+{%   if switch_list | length >= 2 %}
+{%     set peer2_members = vpc_interface.members[switch_list[1]] | default([]) %}
     peer2_members:
-{% for member in peer2_members %}
+{%     for member in peer2_members %}
       - {{ member.interface }}
-{% endfor %}
-{% endif %}
+{%     endfor %}
+{%   endif %}
 {% endif %}

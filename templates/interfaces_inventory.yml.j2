@@ -39,6 +39,9 @@ switches:
 {% for interface in switch_data.interfaces %}
       - name: {{ interface.name | default(interface.interface) }}
         type: {{ interface.type }}
+{% if interface.state is defined %}
+        state: {{ interface.state }}
+{% endif %}
 {% if interface.mode is defined %}
         mode: {{ interface.mode }}
 {% elif interface.ipv4_address is defined %}
