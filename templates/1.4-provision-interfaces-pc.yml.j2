@@ -1,0 +1,83 @@
+{#
+================================================================================
+Template: Port-channel Interface Configuration for dcnm_interface Module
+================================================================================
+Purpose:
+  Generate Port-channel interface configuration list for the cisco.dcnm.dcnm_interface
+  module to deploy L2 port-channel interfaces to NDFC.
+
+Module: cisco.dcnm.dcnm_interface
+  - type: pc (Port-channel interface)
+  - state: replaced (idempotent configuration)
+
+Input Variables:
+  switches_to_provision      - List of switches with add_to_fabric: true
+  l2_interfaces_lookup       - Consolidated interface data per switch
+
+Output:
+  List of Port-channel interface configurations in dcnm_interface format
+
+Interface Naming:
+  - Input: port-channel113
+  - Output: po113 (dcnm_interface format)
+
+Member Interface Naming:
+  - Input: Ethernet1/1
+  - Output: e1/1 (dcnm_interface format)
+
+Port-channel Settings:
+  - pc_mode: active (LACP active mode)
+  - mtu: jumbo (9216 bytes)
+  - bpdu_guard: true
+  - port_type_fast: true (spanning-tree edge)
+
+================================================================================
+#}
+{% set config = [] %}
+{% for switch in switches_to_provision %}
+  {% set switch_name = switch.inventory_hostname %}
+  {% if switch_name in l2_interfaces_lookup %}
+    {% set switch_ip = hostvars[switch_name]['ansible_host'] %}
+    {% set pc_interfaces = l2_interfaces_lookup[switch_name].interfaces | selectattr('type', 'equalto', 'pc') | list %}
+    {% for iface in pc_interfaces %}
+      {% set pc_id = iface.name | regex_replace('^port-channel', '') %}
+      {% set iface_name = 'po' + pc_id %}
+      {% set members = [] %}
+      {% if iface.members is defined %}
+        {% for member in iface.members %}
+          {% set member_name = member.interface | regex_replace('^Ethernet', 'e') %}
+          {% set _ = members.append(member_name) %}
+        {% endfor %}
+      {% endif %}
+      {% set iface_config = {
+        'name': iface_name,
+        'type': 'pc',
+        'switch': [switch_ip],
+        'deploy': true,
+        'profile': {
+          'admin_state': true,
+          'mode': iface.mode,
+          'members': members,
+          'pc_mode': 'active',
+          'bpdu_guard': 'true',
+          'port_type_fast': true,
+          'mtu': 'jumbo',
+          'description': iface.description | default('')
+        }
+      } %}
+      {% if iface.mode == 'trunk' %}
+        {% set _ = iface_config.profile.update({
+          'allowed_vlans': iface.trunk.allowed_vlans | default('none'),
+          'native_vlan': iface.trunk.native_vlan | default('') | string,
+          'bpdu_guard': 'false'
+        }) %}
+      {% elif iface.mode == 'access' %}
+        {% set _ = iface_config.profile.update({
+          'access_vlan': iface.access.vlan | default('') | string
+        }) %}
+      {% endif %}
+      {% set _ = config.append(iface_config) %}
+    {% endfor %}
+  {% endif %}
+{% endfor %}
+{{ config | to_json }}

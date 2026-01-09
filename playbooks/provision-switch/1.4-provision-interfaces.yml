@@ -19,6 +19,11 @@
 #   - fabrics/<fabric>/l2_interfaces.yml - Non-VPC L2 interface configurations
 #   - fabrics/<fabric>/l2_vpc_interfaces.yml - VPC interface configurations
 #
+# Templates Used:
+#   - templates/1.4-provision-interfaces-eth.yml.j2 - Ethernet interface config
+#   - templates/1.4-provision-interfaces-pc.yml.j2 - Port-channel interface config
+#   - templates/1.4-provision-interfaces-vpc.yml.j2 - VPC interface config
+#
 # Tags:
 #   - deploy-l2-interfaces: Deploy only Layer 2 interfaces
 #   - deploy-vpc-interfaces: Deploy only VPC interfaces
@@ -107,47 +112,9 @@
     #--------------------------------------------------------------------------
     # Configure Ethernet Interfaces using dcnm_interface module
     #--------------------------------------------------------------------------
-    - name: Build Ethernet interface configuration for dcnm_interface
+    - name: Build Ethernet interface configuration from template
       ansible.builtin.set_fact:
-        eth_interface_config: >-
-          {%- set config = [] -%}
-          {%- for switch in switches_to_provision -%}
-            {%- set switch_name = switch.inventory_hostname -%}
-            {%- if switch_name in l2_interfaces_lookup -%}
-              {%- set switch_ip = hostvars[switch_name]['ansible_host'] -%}
-              {%- set eth_interfaces = l2_interfaces_lookup[switch_name].interfaces | selectattr('type', 'equalto', 'eth') | list -%}
-              {%- for iface in eth_interfaces -%}
-                {%- set iface_name = iface.name | regex_replace('^Ethernet', 'eth') -%}
-                {%- set iface_config = {
-                  'name': iface_name,
-                  'type': 'eth',
-                  'switch': [switch_ip],
-                  'deploy': true,
-                  'profile': {
-                    'admin_state': true,
-                    'mode': iface.mode,
-                    'description': iface.description | default('')
-                  }
-                } -%}
-                {%- if iface.mode == 'trunk' -%}
-                  {%- set _ = iface_config.profile.update({
-                    'allowed_vlans': iface.trunk.allowed_vlans | default('none'),
-                    'native_vlan': iface.trunk.native_vlan | default('') | string,
-                    'bpdu_guard': 'true',
-                    'port_type_fast': true
-                  }) -%}
-                {%- elif iface.mode == 'access' -%}
-                  {%- set _ = iface_config.profile.update({
-                    'access_vlan': iface.access.vlan | default('') | string,
-                    'bpdu_guard': 'true',
-                    'port_type_fast': true
-                  }) -%}
-                {%- endif -%}
-                {%- set _ = config.append(iface_config) -%}
-              {%- endfor -%}
-            {%- endif -%}
-          {%- endfor -%}
-          {{ config }}
+        eth_interface_config: "{{ lookup('template', playbook_dir + '/../../templates/1.4-provision-interfaces-eth.yml.j2') | from_json }}"
       when:
         - switches_to_provision | length > 0
         - l2_interfaces_lookup is defined
@@ -180,56 +147,9 @@
     #--------------------------------------------------------------------------
     # Configure Port-channel Interfaces using dcnm_interface module
     #--------------------------------------------------------------------------
-    - name: Build Port-channel interface configuration for dcnm_interface
+    - name: Build Port-channel interface configuration from template
       ansible.builtin.set_fact:
-        pc_interface_config: >-
-          {%- set config = [] -%}
-          {%- for switch in switches_to_provision -%}
-            {%- set switch_name = switch.inventory_hostname -%}
-            {%- if switch_name in l2_interfaces_lookup -%}
-              {%- set switch_ip = hostvars[switch_name]['ansible_host'] -%}
-              {%- set pc_interfaces = l2_interfaces_lookup[switch_name].interfaces | selectattr('type', 'equalto', 'pc') | list -%}
-              {%- for iface in pc_interfaces -%}
-                {%- set pc_id = iface.name | regex_replace('^port-channel', '') -%}
-                {%- set iface_name = 'po' + pc_id -%}
-                {%- set members = [] -%}
-                {%- if iface.members is defined -%}
-                  {%- for member in iface.members -%}
-                    {%- set member_name = member.interface | regex_replace('^Ethernet', 'e') -%}
-                    {%- set _ = members.append(member_name) -%}
-                  {%- endfor -%}
-                {%- endif -%}
-                {%- set iface_config = {
-                  'name': iface_name,
-                  'type': 'pc',
-                  'switch': [switch_ip],
-                  'deploy': true,
-                  'profile': {
-                    'admin_state': true,
-                    'mode': iface.mode,
-                    'members': members,
-                    'pc_mode': 'active',
-                    'bpdu_guard': 'true',
-                    'port_type_fast': true,
-                    'mtu': 'jumbo',
-                    'description': iface.description | default('')
-                  }
-                } -%}
-                {%- if iface.mode == 'trunk' -%}
-                  {%- set _ = iface_config.profile.update({
-                    'allowed_vlans': iface.trunk.allowed_vlans | default('none'),
-                    'native_vlan': iface.trunk.native_vlan | default('') | string
-                  }) -%}
-                {%- elif iface.mode == 'access' -%}
-                  {%- set _ = iface_config.profile.update({
-                    'access_vlan': iface.access.vlan | default('') | string
-                  }) -%}
-                {%- endif -%}
-                {%- set _ = config.append(iface_config) -%}
-              {%- endfor -%}
-            {%- endif -%}
-          {%- endfor -%}
-          {{ config }}
+        pc_interface_config: "{{ lookup('template', playbook_dir + '/../../templates/1.4-provision-interfaces-pc.yml.j2') | from_json }}"
       when:
         - switches_to_provision | length > 0
         - l2_interfaces_lookup is defined
@@ -334,76 +254,11 @@
       when: switches_to_provision | length > 0
 
     #--------------------------------------------------------------------------
-    # Build VPC interface configuration for dcnm_interface module
+    # Build VPC interface configuration from template
     #--------------------------------------------------------------------------
-    - name: Build VPC interface configuration for dcnm_interface
+    - name: Build VPC interface configuration from template
       ansible.builtin.set_fact:
-        vpc_interface_config: >-
-          {%- set config = [] -%}
-          {%- for fabric_name in fabrics_to_process | default([]) -%}
-            {%- if fabric_name in vpc_interfaces_by_fabric -%}
-              {%- for vpc in vpc_interfaces_by_fabric[fabric_name] -%}
-                {%- set peer1_name = vpc.switches[0] -%}
-                {%- set peer2_name = vpc.switches[1] -%}
-                {%- set peer1_ip = hostvars[peer1_name]['ansible_host'] -%}
-                {%- set peer2_ip = hostvars[peer2_name]['ansible_host'] -%}
-                {%- set peer1_members = [] -%}
-                {%- set peer2_members = [] -%}
-                {%- if vpc.members is defined -%}
-                  {%- if peer1_name in vpc.members -%}
-                    {%- for member in vpc.members[peer1_name] -%}
-                      {%- set member_name = member.interface | regex_replace('^Ethernet', 'e') -%}
-                      {%- set _ = peer1_members.append(member_name) -%}
-                    {%- endfor -%}
-                  {%- endif -%}
-                  {%- if peer2_name in vpc.members -%}
-                    {%- for member in vpc.members[peer2_name] -%}
-                      {%- set member_name = member.interface | regex_replace('^Ethernet', 'e') -%}
-                      {%- set _ = peer2_members.append(member_name) -%}
-                    {%- endfor -%}
-                  {%- endif -%}
-                {%- endif -%}
-                {%- set vpc_name = 'vpc' + vpc.vpc_id | string -%}
-                {%- set vpc_config = {
-                  'name': vpc_name,
-                  'type': 'vpc',
-                  'switch': [[peer1_ip, peer2_ip]],
-                  'deploy': true,
-                  'profile': {
-                    'admin_state': true,
-                    'mode': vpc.mode,
-                    'peer1_pcid': vpc.vpc_id,
-                    'peer2_pcid': vpc.vpc_id,
-                    'peer1_members': peer1_members,
-                    'peer2_members': peer2_members,
-                    'pc_mode': 'active',
-                    'bpdu_guard': 'true',
-                    'port_type_fast': true,
-                    'mtu': 'jumbo'
-                  }
-                } -%}
-                {%- if vpc.mode == 'trunk' -%}
-                  {%- set _ = vpc_config.profile.update({
-                    'peer1_allowed_vlans': vpc.trunk.allowed_vlans | default('none'),
-                    'peer2_allowed_vlans': vpc.trunk.allowed_vlans | default('none'),
-                    'peer1_native_vlan': vpc.trunk.native_vlan | default('') | string,
-                    'peer2_native_vlan': vpc.trunk.native_vlan | default('') | string,
-                    'peer1_description': vpc.description | default('VPC ' + vpc.vpc_id | string + ' trunk'),
-                    'peer2_description': vpc.description | default('VPC ' + vpc.vpc_id | string + ' trunk')
-                  }) -%}
-                {%- elif vpc.mode == 'access' -%}
-                  {%- set _ = vpc_config.profile.update({
-                    'peer1_access_vlan': vpc.access.vlan | default('') | string,
-                    'peer2_access_vlan': vpc.access.vlan | default('') | string,
-                    'peer1_description': vpc.description | default('VPC ' + vpc.vpc_id | string + ' access'),
-                    'peer2_description': vpc.description | default('VPC ' + vpc.vpc_id | string + ' access')
-                  }) -%}
-                {%- endif -%}
-                {%- set _ = config.append(vpc_config) -%}
-              {%- endfor -%}
-            {%- endif -%}
-          {%- endfor -%}
-          {{ config }}
+        vpc_interface_config: "{{ lookup('template', playbook_dir + '/../../templates/1.4-provision-interfaces-vpc.yml.j2') | from_json }}"
       when:
         - switches_to_provision | length > 0
         - vpc_interfaces_by_fabric is defined

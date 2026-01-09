@@ -1,0 +1,67 @@
+{#
+================================================================================
+Template: Ethernet Interface Configuration for dcnm_interface Module
+================================================================================
+Purpose:
+  Generate Ethernet interface configuration list for the cisco.dcnm.dcnm_interface
+  module to deploy L2 access and trunk interfaces to NDFC.
+
+Module: cisco.dcnm.dcnm_interface
+  - type: eth (Ethernet interface)
+  - state: replaced (idempotent configuration)
+
+Input Variables:
+  switches_to_provision      - List of switches with add_to_fabric: true
+  l2_interfaces_lookup       - Consolidated interface data per switch
+
+Output:
+  List of Ethernet interface configurations in dcnm_interface format
+
+Interface Naming:
+  - Input: Ethernet1/3
+  - Output: eth1/3 (dcnm_interface format)
+
+Supported Modes:
+  - access: Single VLAN access port with BPDU guard
+  - trunk: Multiple VLANs with native VLAN and BPDU guard
+
+================================================================================
+#}
+{% set config = [] %}
+{% for switch in switches_to_provision %}
+  {% set switch_name = switch.inventory_hostname %}
+  {% if switch_name in l2_interfaces_lookup %}
+    {% set switch_ip = hostvars[switch_name]['ansible_host'] %}
+    {% set eth_interfaces = l2_interfaces_lookup[switch_name].interfaces | selectattr('type', 'equalto', 'eth') | list %}
+    {% for iface in eth_interfaces %}
+      {% set iface_name = iface.name | regex_replace('^Ethernet', 'eth') %}
+      {% set iface_config = {
+        'name': iface_name,
+        'type': 'eth',
+        'switch': [switch_ip],
+        'deploy': true,
+        'profile': {
+          'admin_state': true,
+          'mode': iface.mode,
+          'description': iface.description | default('')
+        }
+      } %}
+      {% if iface.mode == 'trunk' %}
+        {% set _ = iface_config.profile.update({
+          'allowed_vlans': iface.trunk.allowed_vlans | default('none'),
+          'native_vlan': iface.trunk.native_vlan | default('') | string,
+          'bpdu_guard': 'true',
+          'port_type_fast': true
+        }) %}
+      {% elif iface.mode == 'access' %}
+        {% set _ = iface_config.profile.update({
+          'access_vlan': iface.access.vlan | default('') | string,
+          'bpdu_guard': 'true',
+          'port_type_fast': true
+        }) %}
+      {% endif %}
+      {% set _ = config.append(iface_config) %}
+    {% endfor %}
+  {% endif %}
+{% endfor %}
+{{ config | to_json }}
