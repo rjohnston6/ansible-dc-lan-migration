@@ -1,0 +1,108 @@
+{#
+================================================================================
+Template: VPC Interface Configuration for dcnm_interface Module
+================================================================================
+Purpose:
+  Generate VPC interface configuration list for the cisco.dcnm.dcnm_interface
+  module to deploy VPC interfaces spanning two switches to NDFC.
+
+Module: cisco.dcnm.dcnm_interface
+  - type: vpc (Virtual Port-channel interface)
+  - state: replaced (idempotent configuration)
+
+Input Variables:
+  fabrics_to_process         - List of unique fabric names to process
+  vpc_interfaces_by_fabric   - VPC interface data organized by fabric
+
+Output:
+  List of VPC interface configurations in dcnm_interface format
+
+Interface Naming:
+  - Input: port-channel113 with vpc_id: 113
+  - Output: vpc113 (dcnm_interface format)
+
+Member Interface Naming:
+  - Input: Ethernet1/4
+  - Output: e1/4 (dcnm_interface format)
+
+VPC Settings:
+  - peer1_pcid/peer2_pcid: VPC ID for each peer
+  - pc_mode: active (LACP active mode)
+  - mtu: jumbo (9216 bytes)
+  - bpdu_guard: true
+  - port_type_fast: true (spanning-tree edge)
+
+================================================================================
+#}
+{% set config = [] %}
+{% for fabric_name in fabrics_to_process | default([]) %}
+  {% if fabric_name in vpc_interfaces_by_fabric %}
+    {% for vpc in vpc_interfaces_by_fabric[fabric_name] %}
+      {# Skip vpc_id 1 as it's typically the VPC peer-link managed by VPC domain #}
+      {% if vpc.vpc_id | int == 1 %}
+        {# Skip VPC peer-link #}
+      {% else %}
+      {% set peer1_name = vpc.switches[0] %}
+      {% set peer2_name = vpc.switches[1] %}
+      {% set peer1_ip = hostvars[peer1_name]['ansible_host'] %}
+      {% set peer2_ip = hostvars[peer2_name]['ansible_host'] %}
+      {% set peer1_members = [] %}
+      {% set peer2_members = [] %}
+      {% if vpc.members is defined %}
+        {% if peer1_name in vpc.members %}
+          {% for member in vpc.members[peer1_name] %}
+            {% set member_name = member.interface | regex_replace('^Ethernet', 'e') %}
+            {% set _ = peer1_members.append(member_name) %}
+          {% endfor %}
+        {% endif %}
+        {% if peer2_name in vpc.members %}
+          {% for member in vpc.members[peer2_name] %}
+            {% set member_name = member.interface | regex_replace('^Ethernet', 'e') %}
+            {% set _ = peer2_members.append(member_name) %}
+          {% endfor %}
+        {% endif %}
+      {% endif %}
+      {% set vpc_name = 'vpc' + vpc.vpc_id | string %}
+      {% set vpc_config = {
+        'name': vpc_name,
+        'type': 'vpc',
+        'switch': [peer1_ip, peer2_ip],
+        'deploy': true,
+        'profile': {
+          'admin_state': true,
+          'mode': vpc.mode,
+          'peer1_pcid': vpc.vpc_id,
+          'peer2_pcid': vpc.vpc_id,
+          'peer1_members': peer1_members,
+          'peer2_members': peer2_members,
+          'pc_mode': 'active',
+          'bpdu_guard': 'true',
+          'port_type_fast': true,
+          'mtu': 'jumbo',
+          'lacp_suspend_individual': 'false'
+        }
+      } %}
+      {% if vpc.mode == 'trunk' %}
+        {% set _ = vpc_config.profile.update({
+          'peer1_allowed_vlans': vpc.trunk.allowed_vlans | default('none'),
+          'peer2_allowed_vlans': vpc.trunk.allowed_vlans | default('none'),
+          'peer1_native_vlan': vpc.trunk.native_vlan | default('') | string,
+          'peer2_native_vlan': vpc.trunk.native_vlan | default('') | string,
+          'peer1_description': vpc.description | default('VPC ' + vpc.vpc_id | string + ' trunk'),
+          'peer2_description': vpc.description | default('VPC ' + vpc.vpc_id | string + ' trunk'),
+          'bpdu_guard': 'false'
+        }) %}
+      {% elif vpc.mode == 'access' %}
+        {% set _ = vpc_config.profile.update({
+          'peer1_access_vlan': vpc.access.vlan | default('') | string,
+          'peer2_access_vlan': vpc.access.vlan | default('') | string,
+          'peer1_description': vpc.description | default('VPC ' + vpc.vpc_id | string + ' access'),
+          'peer2_description': vpc.description | default('VPC ' + vpc.vpc_id | string + ' access')
+        }) %}
+      {% endif %}
+      {% set _ = config.append(vpc_config) %}
+      {% endif %}{# end skip vpc_id 1 #}
+    {% endfor %}
+  {% endif %}
+{% endfor %}
+{{ config | to_json }}
