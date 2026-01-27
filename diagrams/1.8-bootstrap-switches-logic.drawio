@@ -1,0 +1,197 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="app.diagrams.net" modified="2026-01-27T00:00:00.000Z" agent="draw.io" version="22.0.0" type="device">
+  <diagram name="1.8-bootstrap-switches" id="bootstrap-switches-logic">
+    <mxGraphModel dx="1434" dy="836" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1400" pageHeight="1000" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        
+        <!-- Title -->
+        <mxCell id="title" value="1.8-bootstrap-switches.yml Logic Flow" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=24;fontStyle=1;fontColor=#FF9933;" vertex="1" parent="1">
+          <mxGeometry x="400" y="20" width="600" height="40" as="geometry" />
+        </mxCell>
+        
+        <!-- Start -->
+        <mxCell id="start" value="START" style="ellipse;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#FF9933;fontStyle=1;fontColor=#FF9933;" vertex="1" parent="1">
+          <mxGeometry x="640" y="80" width="120" height="50" as="geometry" />
+        </mxCell>
+        
+        <!-- Build switches list -->
+        <mxCell id="build_list" value="Build list of switches where&#xa;add_to_fabric = true" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#FF9933;fontColor=#FF9933;" vertex="1" parent="1">
+          <mxGeometry x="600" y="160" width="200" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="edge1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#FF9933;" edge="1" parent="1" source="start" target="build_list">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <!-- Decision: Any switches? -->
+        <mxCell id="dec_any" value="switches_to_bootstrap&#xa;&gt; 0?" style="rhombus;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#FF9933;fontColor=#FF9933;" vertex="1" parent="1">
+          <mxGeometry x="620" y="250" width="160" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="edge2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#FF9933;" edge="1" parent="1" source="build_list" target="dec_any">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <!-- No switches - End -->
+        <mxCell id="end_no" value="END&#xa;(No switches)" style="ellipse;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#FF9933;fontColor=#FF9933;" vertex="1" parent="1">
+          <mxGeometry x="840" y="255" width="100" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="edge_no" value="No" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#FF9933;fontColor=#FF9933;" edge="1" parent="1" source="dec_any" target="end_no">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <!-- Get unique fabrics -->
+        <mxCell id="get_fabrics" value="Get unique fabrics&#xa;from switches list" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#FF9933;fontColor=#FF9933;" vertex="1" parent="1">
+          <mxGeometry x="600" y="370" width="200" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="edge3" value="Yes" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#FF9933;fontColor=#FF9933;" edge="1" parent="1" source="dec_any" target="get_fabrics">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <!-- Query POAP inventory -->
+        <mxCell id="query_poap" value="Query POAP inventory for each fabric&#xa;GET /fabrics/{fabric}/inventory/poap" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#FF9933;fontColor=#FF9933;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="560" y="450" width="280" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="edge4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#FF9933;" edge="1" parent="1" source="get_fabrics" target="query_poap">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <!-- Build POAP lookup -->
+        <mxCell id="build_lookup" value="Build POAP switches lookup&#xa;{ fabric: { serial: switch_data } }" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#FF9933;fontColor=#FF9933;" vertex="1" parent="1">
+          <mxGeometry x="580" y="540" width="240" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="edge5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#FF9933;" edge="1" parent="1" source="query_poap" target="build_lookup">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <!-- Load fabric data -->
+        <mxCell id="load_data" value="Load fabric data:&#xa;• l2_interfaces.yml (port-channels)&#xa;• l3_interfaces.yml (mgmt IP prefix)&#xa;• static_routes.yml (gateway)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#FF9933;align=left;spacingLeft=10;fontColor=#FF9933;" vertex="1" parent="1">
+          <mxGeometry x="560" y="620" width="280" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="edge6" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#FF9933;" edge="1" parent="1" source="build_lookup" target="load_data">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <!-- Build bootstrap configs -->
+        <mxCell id="build_configs" value="Build bootstrap configs for each switch:&#xa;Match inventory switches against POAP lookup&#xa;by destination_switch_sn (serial number)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#FF9933;fontColor=#FF9933;" vertex="1" parent="1">
+          <mxGeometry x="540" y="730" width="320" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="edge7" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#FF9933;" edge="1" parent="1" source="load_data" target="build_configs">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <!-- Config contents note -->
+        <mxCell id="config_note" value="Bootstrap config includes:&#xa;• hostname, serial, model, version&#xa;• IP address, role, gateway&#xa;• port_channels from L2 data&#xa;• fingerprint, public_key from POAP" style="shape=note;whiteSpace=wrap;html=1;size=14;verticalAlign=top;align=left;spacingLeft=5;fillColor=none;strokeColor=#FF9933;fontSize=10;fontColor=#FF9933;" vertex="1" parent="1">
+          <mxGeometry x="900" y="710" width="200" height="100" as="geometry" />
+        </mxCell>
+        
+        <!-- Decision: Connected switches? -->
+        <mxCell id="dec_connected" value="bootstrap_configs&#xa;&gt; 0?" style="rhombus;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#FF9933;fontColor=#FF9933;" vertex="1" parent="1">
+          <mxGeometry x="620" y="830" width="160" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="edge8" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#FF9933;" edge="1" parent="1" source="build_configs" target="dec_connected">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <!-- No connected - End -->
+        <mxCell id="end_none" value="END&#xa;(No POAP switches&#xa;connected yet)" style="ellipse;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#FF9933;fontColor=#FF9933;" vertex="1" parent="1">
+          <mxGeometry x="320" y="835" width="140" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="edge_none" value="No" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#FF9933;fontColor=#FF9933;" edge="1" parent="1" source="dec_connected" target="end_none">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <!-- Hint note -->
+        <mxCell id="hint_note" value="Run 1.7-check-poap-status.yml&#xa;to verify switch connectivity" style="shape=note;whiteSpace=wrap;html=1;size=14;verticalAlign=top;align=left;spacingLeft=5;fillColor=none;strokeColor=#FF9933;fontSize=10;fontColor=#FF9933;" vertex="1" parent="1">
+          <mxGeometry x="180" y="830" width="180" height="50" as="geometry" />
+        </mxCell>
+        
+        <!-- Display switches -->
+        <mxCell id="display" value="Display switches ready to bootstrap&#xa;(hostname, serial, fabric, model, IP, role)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#FF9933;fontColor=#FF9933;" vertex="1" parent="1">
+          <mxGeometry x="560" y="950" width="280" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="edge9" value="Yes" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#FF9933;fontColor=#FF9933;" edge="1" parent="1" source="dec_connected" target="display">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <!-- Loop start -->
+        <mxCell id="loop_start" value="FOR EACH switch in bootstrap_configs" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#FF9933;fontColor=#FF9933;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="560" y="1030" width="280" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="edge10" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#FF9933;" edge="1" parent="1" source="display" target="loop_start">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <!-- POST Bootstrap API -->
+        <mxCell id="post_bootstrap" value="POST to NDFC POAP Bootstrap API&#xa;/fabrics/{fabric}/inventory/poap&#xa;&#xa;Template: 1.8-bootstrap-switches.j2&#xa;&#xa;Variables: serial, model, version,&#xa;hostname, IP, password, role,&#xa;gateway, port_channels, fingerprint" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#FF9933;align=center;fontColor=#FF9933;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="530" y="1100" width="340" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="edge11" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#FF9933;" edge="1" parent="1" source="loop_start" target="post_bootstrap">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <!-- Display results -->
+        <mxCell id="display_results" value="Display bootstrap results&#xa;✓ SUCCESS / ✗ FAILED per switch" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#FF9933;fontColor=#FF9933;" vertex="1" parent="1">
+          <mxGeometry x="580" y="1260" width="240" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="edge12" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#FF9933;" edge="1" parent="1" source="post_bootstrap" target="display_results">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <!-- End -->
+        <mxCell id="end" value="END" style="ellipse;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#FF9933;fontStyle=1;fontColor=#FF9933;" vertex="1" parent="1">
+          <mxGeometry x="640" y="1340" width="120" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="edge_end" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#FF9933;" edge="1" parent="1" source="display_results" target="end">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <!-- Legend -->
+        <mxCell id="legend" value="LEGEND" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontStyle=1;fontSize=12;fontColor=#FF9933;" vertex="1" parent="1">
+          <mxGeometry x="60" y="80" width="100" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="leg1" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#FF9933;" vertex="1" parent="1">
+          <mxGeometry x="60" y="110" width="30" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="leg1t" value="Process/Task" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=10;fontColor=#FF9933;" vertex="1" parent="1">
+          <mxGeometry x="100" y="110" width="100" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="leg2" value="" style="rhombus;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#FF9933;" vertex="1" parent="1">
+          <mxGeometry x="60" y="140" width="30" height="25" as="geometry" />
+        </mxCell>
+        <mxCell id="leg2t" value="Decision" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=10;fontColor=#FF9933;" vertex="1" parent="1">
+          <mxGeometry x="100" y="140" width="100" height="25" as="geometry" />
+        </mxCell>
+        <mxCell id="leg3" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#FF9933;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="60" y="175" width="30" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="leg3t" value="API Call (thick border)" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=10;fontColor=#FF9933;" vertex="1" parent="1">
+          <mxGeometry x="100" y="175" width="120" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="leg4" value="" style="ellipse;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#FF9933;" vertex="1" parent="1">
+          <mxGeometry x="60" y="205" width="30" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="leg4t" value="Start/End" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=10;fontColor=#FF9933;" vertex="1" parent="1">
+          <mxGeometry x="100" y="205" width="100" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="leg5" value="" style="shape=note;whiteSpace=wrap;html=1;size=10;fillColor=none;strokeColor=#FF9933;" vertex="1" parent="1">
+          <mxGeometry x="60" y="235" width="30" height="25" as="geometry" />
+        </mxCell>
+        <mxCell id="leg5t" value="Note/Comment" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=10;fontColor=#FF9933;" vertex="1" parent="1">
+          <mxGeometry x="100" y="235" width="100" height="25" as="geometry" />
+        </mxCell>
+        
+        <!-- Prerequisites Box -->
+        <mxCell id="prereq" value="PREREQUISITES&#xa;&#xa;• Run playbooks 1.0-1.6 first&#xa;• Switch booted via POAP&#xa;• Verify with 1.7-check-poap-status.yml" style="shape=note;whiteSpace=wrap;html=1;size=14;verticalAlign=top;align=left;spacingLeft=5;fillColor=none;strokeColor=#FF9933;fontSize=10;fontColor=#FF9933;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="60" y="300" width="200" height="100" as="geometry" />
+        </mxCell>
+        
+        <!-- Matching Logic Box -->
+        <mxCell id="match_logic" value="MATCHING LOGIC&#xa;&#xa;Switch matches if:&#xa;destination_switch_sn (hosts.yml)&#xa;= serialNumber (POAP inventory)" style="shape=note;whiteSpace=wrap;html=1;size=14;verticalAlign=top;align=left;spacingLeft=5;fillColor=none;strokeColor=#FF9933;fontSize=10;fontColor=#FF9933;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="60" y="420" width="200" height="100" as="geometry" />
+        </mxCell>
+        
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

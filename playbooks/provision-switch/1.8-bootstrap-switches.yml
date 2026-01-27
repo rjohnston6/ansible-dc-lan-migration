@@ -103,6 +103,45 @@
       when: poap_inventory_query is defined
 
     #--------------------------------------------------------------------------
+    # Load L2 interface data for port-channel bootstrap configuration
+    #--------------------------------------------------------------------------
+    - name: Find all l2_interfaces.yml files
+      ansible.builtin.find:
+        paths: "{{ playbook_dir }}/../../fabrics"
+        patterns: "l2_interfaces.yml"
+        recurse: true
+      register: l2_interfaces_files
+      when: switches_to_bootstrap | length > 0
+
+    - name: Load L2 interface data from all fabrics
+      ansible.builtin.include_vars:
+        file: "{{ item.path }}"
+        name: "l2_data_{{ item.path | dirname | basename }}"
+      loop: "{{ l2_interfaces_files.files | default([]) }}"
+      loop_control:
+        label: "{{ item.path | dirname | basename }}"
+      when: switches_to_bootstrap | length > 0
+
+    - name: Build consolidated L2 interfaces lookup
+      ansible.builtin.set_fact:
+        l2_interfaces_lookup: |
+          {%- set lookup = {} -%}
+          {%- for file in l2_interfaces_files.files | default([]) -%}
+            {%- set fabric_name = file.path | dirname | basename -%}
+            {%- set var_name = 'l2_data_' + fabric_name -%}
+            {%- if hostvars[inventory_hostname][var_name] is defined -%}
+              {%- set fabric_data = hostvars[inventory_hostname][var_name] -%}
+              {%- if fabric_data.switches is defined -%}
+                {%- for hostname, data in fabric_data.switches.items() -%}
+                  {%- set _ = lookup.update({hostname: {'interfaces': data.interfaces | default([]), 'fabric': fabric_name}}) -%}
+                {%- endfor -%}
+              {%- endif -%}
+            {%- endif -%}
+          {%- endfor -%}
+          {{ lookup }}
+      when: switches_to_bootstrap | length > 0
+
+    #--------------------------------------------------------------------------
     # Load static routes and L3 interface data for gateway info
     #--------------------------------------------------------------------------
     - name: Find all static_routes.yml files
@@ -200,6 +239,9 @@
               {%- set mgmt_ip = mgmt_iface.ipv4_address | default('') -%}
               {%- set gateway_prefix = mgmt_ip.split('/')[1] | default('24') if mgmt_ip else '24' -%}
               {%- set gateway = gateway_ip + '/' + gateway_prefix if gateway_ip else '' -%}
+              {# Get port-channel configs from l2_interfaces_lookup #}
+              {%- set l2_data = l2_interfaces_lookup.get(hostname, {}) -%}
+              {%- set port_channels = l2_data.interfaces | default([]) | selectattr('type', 'equalto', 'pc') | list -%}
               {%- set config = {
                 'hostname': hostname,
                 'serial_number': serial,
@@ -209,6 +251,7 @@
                 'ip_address': switch.ansible_host | default(''),
                 'role': switch.role | default('access'),
                 'gateway': gateway,
+                'port_channels': port_channels | list,
                 'poap_data': poap_data.data | default('{}'),
                 'fingerprint': poap_data.fingerprint | default(''),
                 'public_key': poap_data.publicKey | default('')
@@ -231,7 +274,8 @@
             ├─ Model: {{ config.model }}
             ├─ IP: {{ config.ip_address }}
             ├─ Role: {{ config.role }}
-            └─ Gateway: {{ config.gateway }}
+            ├─ Gateway: {{ config.gateway }}
+            └─ Port-Channels: {{ config.port_channels | length }}
           {% endfor %}
           {% if bootstrap_configs | length == 0 %}
           No switches are connected via POAP yet. Run 1.7-check-poap-status.yml first to verify.
@@ -263,6 +307,7 @@
         password: "{{ vault_switch_password }}"
         role: "{{ item.role }}"
         gateway: "{{ item.gateway }}"
+        port_channels: "{{ item.port_channels }}"
         poap_data: "{{ item.poap_data }}"
         fingerprint: "{{ item.fingerprint }}"
         public_key: "{{ item.public_key }}"

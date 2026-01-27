@@ -107,9 +107,9 @@
             {%- set mgmt_int = switch.mgmt_int | default('Vlan199') -%}
             {%- if serial and hostname in static_routes_lookup -%}
               {%- set routes_data = static_routes_lookup[hostname] -%}
-              {# Find default route (0.0.0.0/0) that uses the management interface #}
+              {# Find default route (0.0.0.0/0) #}
               {%- for route in routes_data.routes | default([]) -%}
-                {%- if route.prefix == '0.0.0.0/0' and route.interface == mgmt_int -%}
+                {%- if route.prefix == '0.0.0.0/0' -%}
                   {%- set vrf = route.vrf | default('') -%}
                   {%- if vrf == 'default' -%}
                     {%- set vrf = '' -%}
@@ -120,7 +120,7 @@
                     'fabric_name': fabric,
                     'next_hop': route.next_hop,
                     'prefix': '0.0.0.0/0',
-                    'interface': route.interface | default(''),
+                    'interface': route.interface | default(mgmt_int),
                     'vrf_name': vrf,
                     'description': 'Default route'
                   } -%}

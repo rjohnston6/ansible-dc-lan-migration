@@ -58,7 +58,7 @@ SVI Settings:
           'name': 'vlan' ~ vlan_id,
           'type': 'svi',
           'switch': [switch_ip],
-          'deploy': true,
+          'deploy': false,
           'profile': {
             'admin_state': iface.enabled | default(true),
             'mode': 'vlan',

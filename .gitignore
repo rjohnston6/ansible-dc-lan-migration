@@ -71,3 +71,7 @@ site/
 # OS files
 Thumbs.db
 .DS_Store
+
+# RBC-specific files (exclude from public repo)
+*rbc*
+*RBC*

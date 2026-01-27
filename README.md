@@ -98,7 +98,7 @@ The master playbook `0.0-full-provision-switch.yml` executes all playbooks in se
 | # | Playbook | Template(s) | Description |
 |---|----------|-------------|-------------|
 | 0.0 | `full-provision-switch.yml` | — | Master orchestration playbook that executes all provisioning steps 1.0-1.8 in sequence |
-| 1.0 | `preprovision-new-switches.yml` | `1.0-preprovision-new-switches.json.j2` | Pre-provision switches to NDFC via POAP API. Registers switch serial number, model, version, IP, role, and gateway |
+| 1.0 | `provision-switches.yml` | `1.0-preprovision-new-switches.json.j2` | Adds switches to NDFC (see [How Switches Are Added](#how-switches-are-added-to-ndfc) below) |
 | 1.1 | `create-discovery-user.yml` | `1.1-create-discovery-user.json.j2` | Create NDFC discovery user (switch_user policy) for switch authentication during discovery |
 | 1.2 | `provision-features.yml` | `1.2-provision-features.json.j2` | Configure NX-OS feature policies (LACP, LLDP, interface-vlan, etc.) using feature_lookup.yml mapping |
 | 1.3 | `deploy-vpc-domain.yml` | `1.3-deploy-vpc-domain.json.j2` | Deploy VPC domain configuration between aggregation switch pairs |
@@ -107,6 +107,55 @@ The master playbook `0.0-full-provision-switch.yml` executes all playbooks in se
 | 1.6 | `provision-default-route.yml` | `1.6-provision-default-route.json.j2` | Configure static default route (0.0.0.0/0) via management gateway |
 | 1.7 | `check-poap-status.yml` | — | Query POAP inventory to check if switches have connected and are ready for bootstrap |
 | 1.8 | `bootstrap-switches.yml` | `1.8-bootstrap-switches.json.j2` | Bootstrap pre-provisioned switches via POAP API to deploy Day-0 configuration |
+
+### How Switches Are Added to NDFC
+
+The `1.0-provision-switches.yml` playbook automatically determines how to add each switch based on inventory configuration:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                     SWITCH PROVISIONING DECISION FLOW                       │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│   Does the switch have destination_switch_sn, destination_switch_model,    │
+│   AND destination_switch_version defined in hosts.yml?                      │
+│                                                                             │
+│                    YES                              NO                      │
+│                     │                               │                       │
+│                     ▼                               ▼                       │
+│   ┌─────────────────────────────┐   ┌─────────────────────────────┐        │
+│   │     POAP PRE-PROVISION      │   │    DISCOVERY (SSH-BASED)    │        │
+│   ├─────────────────────────────┤   ├─────────────────────────────┤        │
+│   │ For NEW switches not yet    │   │ For EXISTING switches       │        │
+│   │ powered on or connected.    │   │ already online.             │        │
+│   │                             │   │                             │        │
+│   │ • Registers serial number   │   │ • Connects via SSH          │        │
+│   │   with NDFC before boot     │   │ • Imports running config    │        │
+│   │ • Role assigned during      │   │ • Role assigned via API     │        │
+│   │   pre-provisioning ✓        │   │   after discovery           │        │
+│   │ • Gateway configured for    │   │                             │        │
+│   │   POAP bootstrap            │   │                             │        │
+│   └─────────────────────────────┘   └─────────────────────────────┘        │
+│                                                                             │
+│   Example:                          Example:                                │
+│   ┌─────────────────────────────┐   ┌─────────────────────────────┐        │
+│   │ SCCMG02LF13:                │   │ agg01:                      │        │
+│   │   ansible_host: 198.18.24.82│   │   ansible_host: 198.18.24.66│        │
+│   │   role: access              │   │   role: aggregation         │        │
+│   │   destination_switch_sn:    │   │   add_to_fabric: true       │        │
+│   │     91E5LEGJBAA             │   │   # No destination_switch_* │        │
+│   │   destination_switch_model: │   │   # = Discovery mode        │        │
+│   │     N9K-C9300v              │   │                             │        │
+│   │   destination_switch_version│   │                             │        │
+│   │     "10.6(1)"               │   │                             │        │
+│   └─────────────────────────────┘   └─────────────────────────────┘        │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+> **Key Point for Operators**: Switch roles (access, aggregation, etc.) are handled automatically:
+> - **POAP switches**: Role is set when pre-provisioning, no additional API call needed
+> - **Discovery switches**: Role is assigned via NDFC API after the switch is discovered
 
 ### Discovery Workflow (discovery/)
 
@@ -207,13 +256,54 @@ switches:
     access:
       hosts:
         mgmt-acc01:
-          ansible_host: 198.18.24.81          # Source switch IP (for profiling)
+          ansible_host: 198.18.24.81          # Switch management IP
           fabric: mgmt-fabric
           role: access
           add_to_fabric: true                  # Flag to include in provisioning
-          destination_switch_sn: 9VBJSRKWVIZ   # NEW switch serial number
-          destination_switch_model: N9K-C9300v
+          mgmt_int: Vlan199                    # Management interface
+          # POAP Pre-provisioning (new switches only):
+          destination_switch_sn: FDO292012EE
+          destination_switch_model: N9K-C9348GC-FX3
           destination_switch_version: "10.6(1)"
+```
+
+### POAP Pre-Provisioning Variables (New Switch Migration)
+
+When migrating to a **new physical switch** via POAP (Power On Auto Provisioning), the following three variables are **mandatory** and must be defined together. Omitting any one of these will cause the switch to be skipped during provisioning.
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `destination_switch_sn` | **Yes** | Serial number of the new switch hardware. Found on the switch chassis label or via `show inventory` on an existing switch. NDFC uses this to uniquely identify and match the switch when it boots and contacts NDFC via POAP. |
+| `destination_switch_model` | **Yes** | Hardware model of the new switch (e.g., `N9K-C9348GC-FX3`, `N9K-C93180YC-FX`). Must match the actual hardware model exactly. NDFC validates this against the switch hardware during POAP bootstrap. |
+| `destination_switch_version` | **Yes** | Target NX-OS software version the switch will run (e.g., `10.6(1)`, `10.4(3)`). Used by NDFC to validate switch compatibility and optionally apply image policies during bootstrap. |
+
+> **⚠️ Important**: All three `destination_switch_*` variables must be defined together, or none at all.
+> - **All three defined** → Switch is pre-provisioned via POAP API for new hardware deployment
+> - **None defined** → Switch is discovered via SSH for existing switch migration
+> - **Partial definition** → Switch is **skipped** (falls into gap between POAP and Discovery workflows)
+
+#### Example: New Switch (POAP Pre-provisioning)
+```yaml
+mgmt-acc01:
+  ansible_host: 198.18.24.81
+  fabric: mgmt-fabric
+  role: access
+  add_to_fabric: true
+  mgmt_int: Vlan199
+  destination_switch_sn: FDO292012EE           # Required for POAP
+  destination_switch_model: N9K-C9348GC-FX3    # Required for POAP
+  destination_switch_version: "10.6(1)"        # Required for POAP
+```
+
+#### Example: Existing Switch (Discovery via SSH)
+```yaml
+mgmt-acc02:
+  ansible_host: 198.18.24.82
+  fabric: mgmt-fabric
+  role: access
+  add_to_fabric: true
+  mgmt_int: Vlan199
+  # No destination_switch_* variables = discovered via SSH
 ```
 
 ### Vault Configuration
@@ -258,6 +348,70 @@ Already configured (skipped): 5
 - Uses `cisco.nd` collection
 - Credentials: `vault_nd_password`
 - Timeout: 1000 seconds
+
+---
+
+## POAP Requirements for Aggregation Port-Channels
+
+When configuring VPC port-channels on aggregation switches that connect to POAP-enabled leaf switches, the following configuration is **required** to ensure successful POAP bootstrapping:
+
+### Required Port-Channel Configuration
+
+```cisco
+interface port-channel <id>
+  no lacp suspend-individual
+  spanning-tree port type normal
+  spanning-tree bpduguard disable
+```
+
+### Configuration Rationale
+
+| Configuration | Why Required |
+|---------------|--------------|
+| `no lacp suspend-individual` | Prevents LACP from suspending individual member ports when the port-channel is down. During POAP, the leaf switch does not yet have LACP configured, so member ports operate individually. This allows DHCP and STP BPDUs to flow through member interfaces before the port-channel forms. |
+| `spanning-tree port type normal` | Disables Bridge Assurance on the port-channel. POAP switches boot with default STP settings (Bridge Assurance enabled), but pre-configured aggregation switches may have Bridge Assurance disabled. Mismatched Bridge Assurance settings cause `TYPE_Inc` (Type Inconsistent) errors, blocking all uplinks and preventing POAP from completing. |
+| `spanning-tree bpduguard disable` | Prevents BPDUGuard from shutting down the port if BPDUs are received. During POAP, the leaf switch may send BPDUs as it converges STP topology before receiving its final configuration. |
+
+### Symptom: POAP Failure Due to STP TYPE_Inc
+
+If aggregation port-channels are missing these configurations, POAP switches will exhibit:
+
+```
+switch# show spanning-tree vlan 1
+VLAN0001
+  Spanning tree enabled protocol rstp
+  Root ID    Priority    32769
+             Address     xxxx.xxxx.xxxx
+             This bridge is the root
+
+Interface        Role Sts Cost      Prio.Nbr Type
+---------------- ---- --- --------- -------- --------------------------------
+Eth1/49          Desg BKN*4         128.49   P2p *TYPE_Inc
+Eth1/50          Desg BKN*4         128.50   P2p *TYPE_Inc
+```
+
+**Impact**: All uplinks blocked → POAP script cannot download configuration from NDFC → switch stuck in POAP mode.
+
+### Resolution
+
+Apply the required configuration to **all VPC port-channels** on aggregation switches that connect to POAP leaf switches:
+
+```bash
+# On both aggregation switches (agg01, agg02)
+configure terminal
+interface port-channel 113
+  no lacp suspend-individual
+  spanning-tree port type normal
+  spanning-tree bpduguard disable
+interface port-channel 114
+  no lacp suspend-individual
+  spanning-tree port type normal
+  spanning-tree bpduguard disable
+end
+copy running-config startup-config
+```
+
+After applying, POAP switches should converge STP with one uplink as `Root FWD` and successfully download configuration from NDFC.
 
 ---
 

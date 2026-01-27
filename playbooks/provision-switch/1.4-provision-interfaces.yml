@@ -124,30 +124,73 @@
         - switches_to_provision | length > 0
         - l2_interfaces_lookup is defined
 
+    #--------------------------------------------------------------------------
+    # Separate interfaces by switch role for deployment strategy
+    #--------------------------------------------------------------------------
+    - name: Separate Ethernet interfaces by switch role (aggregation vs access/POAP)
+      ansible.builtin.set_fact:
+        eth_interface_config_agg: "{{ eth_interface_config | selectattr('switch', 'in', agg_switches) | list }}"
+        eth_interface_config_access: "{{ eth_interface_config | rejectattr('switch', 'in', agg_switches) | list }}"
+      vars:
+        agg_switches: "{{ switches_to_provision | selectattr('role', 'equalto', 'aggregation') | map(attribute='inventory_hostname') | list }}"
+      when:
+        - eth_interface_config is defined
+        - eth_interface_config | length > 0
+
     - name: Display Ethernet interfaces to configure
       ansible.builtin.debug:
-        msg: "Configuring {{ eth_interface_config | length }} Ethernet interface(s)"
+        msg: |
+          Configuring {{ eth_interface_config | length }} Ethernet interface(s):
+          - Aggregation switches: {{ eth_interface_config_agg | length }}
+          - Access/POAP switches: {{ eth_interface_config_access | length }}
       when: eth_interface_config is defined and eth_interface_config | length > 0
 
-    - name: Configure Ethernet interfaces via dcnm_interface
+    #--------------------------------------------------------------------------
+    # Configure Ethernet interfaces on aggregation switches (check_deploy: true)
+    #--------------------------------------------------------------------------
+    - name: Configure Ethernet interfaces on aggregation switches via dcnm_interface
       cisco.dcnm.dcnm_interface:
         fabric: "{{ hostvars[switches_to_provision[0].inventory_hostname]['fabric'] }}"
         state: replaced
         check_deploy: true
-        config: "{{ eth_interface_config }}"
+        config: "{{ eth_interface_config_agg }}"
       when:
         - switches_to_provision | length > 0
-        - eth_interface_config is defined
-        - eth_interface_config | length > 0
-      register: eth_deploy_result
+        - eth_interface_config_agg is defined
+        - eth_interface_config_agg | length > 0
+      register: eth_deploy_result_agg
 
-    - name: Display Ethernet interface deployment result
+    - name: Display Ethernet interface deployment result (aggregation)
       ansible.builtin.debug:
         msg: |
-          Ethernet Interface Deployment Result:
-          - Changed: {{ eth_deploy_result.changed | default(false) }}
-          - Response: {{ eth_deploy_result.response | default([]) | length }} operation(s)
-      when: eth_deploy_result is defined
+          Aggregation Ethernet Interface Deployment Result:
+          - Changed: {{ eth_deploy_result_agg.changed | default(false) }}
+          - Response: {{ eth_deploy_result_agg.response | default([]) | length }} operation(s)
+      when: eth_deploy_result_agg is defined
+
+    #--------------------------------------------------------------------------
+    # Configure Ethernet interfaces on access/POAP switches (check_deploy: false)
+    #--------------------------------------------------------------------------
+    - name: Configure Ethernet interfaces on access/POAP switches via dcnm_interface
+      cisco.dcnm.dcnm_interface:
+        fabric: "{{ hostvars[switches_to_provision[0].inventory_hostname]['fabric'] }}"
+        state: replaced
+        check_deploy: false
+        config: "{{ eth_interface_config_access }}"
+      when:
+        - switches_to_provision | length > 0
+        - eth_interface_config_access is defined
+        - eth_interface_config_access | length > 0
+      register: eth_deploy_result_access
+
+    - name: Display Ethernet interface deployment result (access/POAP)
+      ansible.builtin.debug:
+        msg: |
+          Access/POAP Ethernet Interface Deployment Result:
+          - Changed: {{ eth_deploy_result_access.changed | default(false) }}
+          - Response: {{ eth_deploy_result_access.response | default([]) | length }} operation(s)
+          - Note: Deployment check skipped for POAP switches - policies will deploy after bootstrap
+      when: eth_deploy_result_access is defined
 
     #--------------------------------------------------------------------------
     # Configure Port-channel Interfaces using dcnm_interface module
@@ -159,30 +202,64 @@
         - switches_to_provision | length > 0
         - l2_interfaces_lookup is defined
 
+    - name: Separate Port-channel interfaces by switch role (aggregation vs access/POAP)
+      ansible.builtin.set_fact:
+        pc_interface_config_agg: "{{ pc_interface_config | selectattr('switch', 'in', agg_switches) | list }}"
+        pc_interface_config_access: "{{ pc_interface_config | rejectattr('switch', 'in', agg_switches) | list }}"
+      vars:
+        agg_switches: "{{ switches_to_provision | selectattr('role', 'equalto', 'aggregation') | map(attribute='inventory_hostname') | list }}"
+      when:
+        - pc_interface_config is defined
+        - pc_interface_config | length > 0
+
     - name: Display Port-channel interfaces to configure
       ansible.builtin.debug:
-        msg: "Configuring {{ pc_interface_config | length }} Port-channel interface(s)"
+        msg: |
+          Configuring {{ pc_interface_config | length }} Port-channel interface(s):
+          - Aggregation switches: {{ pc_interface_config_agg | length }}
+          - Access/POAP switches: {{ pc_interface_config_access | length }}
       when: pc_interface_config is defined and pc_interface_config | length > 0
 
-    - name: Configure Port-channel interfaces via dcnm_interface
+    - name: Configure Port-channel interfaces on aggregation switches via dcnm_interface
       cisco.dcnm.dcnm_interface:
         fabric: "{{ hostvars[switches_to_provision[0].inventory_hostname]['fabric'] }}"
         state: replaced
         check_deploy: true
-        config: "{{ pc_interface_config }}"
+        config: "{{ pc_interface_config_agg }}"
       when:
         - switches_to_provision | length > 0
-        - pc_interface_config is defined
-        - pc_interface_config | length > 0
-      register: pc_deploy_result
+        - pc_interface_config_agg is defined
+        - pc_interface_config_agg | length > 0
+      register: pc_deploy_result_agg
 
-    - name: Display Port-channel interface deployment result
+    - name: Display Port-channel interface deployment result (aggregation)
       ansible.builtin.debug:
         msg: |
-          Port-channel Interface Deployment Result:
-          - Changed: {{ pc_deploy_result.changed | default(false) }}
-          - Response: {{ pc_deploy_result.response | default([]) | length }} operation(s)
-      when: pc_deploy_result is defined
+          Aggregation Port-channel Interface Deployment Result:
+          - Changed: {{ pc_deploy_result_agg.changed | default(false) }}
+          - Response: {{ pc_deploy_result_agg.response | default([]) | length }} operation(s)
+      when: pc_deploy_result_agg is defined
+
+    - name: Configure Port-channel interfaces on access/POAP switches via dcnm_interface
+      cisco.dcnm.dcnm_interface:
+        fabric: "{{ hostvars[switches_to_provision[0].inventory_hostname]['fabric'] }}"
+        state: replaced
+        check_deploy: false
+        config: "{{ pc_interface_config_access }}"
+      when:
+        - switches_to_provision | length > 0
+        - pc_interface_config_access is defined
+        - pc_interface_config_access | length > 0
+      register: pc_deploy_result_access
+
+    - name: Display Port-channel interface deployment result (access/POAP)
+      ansible.builtin.debug:
+        msg: |
+          Access/POAP Port-channel Interface Deployment Result:
+          - Changed: {{ pc_deploy_result_access.changed | default(false) }}
+          - Response: {{ pc_deploy_result_access.response | default([]) | length }} operation(s)
+          - Note: Deployment check skipped for POAP switches - policies will deploy after bootstrap
+      when: pc_deploy_result_access is defined
 
 
 #------------------------------------------------------------------------------
@@ -280,6 +357,7 @@
 
     #--------------------------------------------------------------------------
     # Configure VPC Interfaces using dcnm_interface module
+    # VPC interfaces always use check_deploy: true (aggregation switches only)
     #--------------------------------------------------------------------------
     - name: Configure VPC interfaces via dcnm_interface
       cisco.dcnm.dcnm_interface:
@@ -396,35 +474,76 @@
         - switches_to_provision | length > 0
         - l3_interfaces_lookup is defined
 
-    - name: Display SVI interfaces to configure
+    - name: Separate SVI interfaces by switch role (aggregation vs access/POAP)
+      ansible.builtin.set_fact:
+        svi_interface_config_agg: "{{ svi_interface_config | selectattr('switch', 'in', agg_switches) | list }}"
+        svi_interface_config_access: "{{ svi_interface_config | rejectattr('switch', 'in', agg_switches) | list }}"
+      vars:
+        agg_switches: "{{ switches_to_provision | selectattr('role', 'equalto', 'aggregation') | map(attribute='inventory_hostname') | list }}"
+      when:
+        - svi_interface_config is defined
+        - svi_interface_config | length > 0
+
+    - name: Display SVI interfaces to configure (Aggregation)
       ansible.builtin.debug:
         msg: |
-          Configuring {{ svi_interface_config | length }} SVI interface(s):
-          {% for svi in svi_interface_config %}
+          Configuring {{ svi_interface_config_agg | length }} aggregation SVI interface(s):
+          {% for svi in svi_interface_config_agg %}
           - {{ svi.name }}: {{ svi.profile.ipv4_addr }}/{{ svi.profile.ipv4_mask_len }} on {{ svi.switch[0] }}
           {% endfor %}
-      when: svi_interface_config is defined and svi_interface_config | length > 0
+      when: svi_interface_config_agg is defined and svi_interface_config_agg | length > 0
 
-    - name: Configure SVI interfaces via dcnm_interface
+    - name: Display SVI interfaces to configure (Access/POAP)
+      ansible.builtin.debug:
+        msg: |
+          Configuring {{ svi_interface_config_access | length }} access/POAP SVI interface(s):
+          {% for svi in svi_interface_config_access %}
+          - {{ svi.name }}: {{ svi.profile.ipv4_addr }}/{{ svi.profile.ipv4_mask_len }} on {{ svi.switch[0] }}
+          {% endfor %}
+      when: svi_interface_config_access is defined and svi_interface_config_access | length > 0
+
+    - name: Configure SVI interfaces (AGGREGATION) via dcnm_interface with check_deploy=true
       cisco.dcnm.dcnm_interface:
         fabric: "{{ fabrics_to_process[0] }}"
         state: replaced
         check_deploy: true
-        config: "{{ svi_interface_config }}"
+        config: "{{ svi_interface_config_agg }}"
       when:
         - switches_to_provision | length > 0
-        - svi_interface_config is defined
-        - svi_interface_config | length > 0
+        - svi_interface_config_agg is defined
+        - svi_interface_config_agg | length > 0
         - fabrics_to_process | length > 0
-      register: svi_deploy_result
+      register: svi_deploy_result_agg
 
-    - name: Display SVI interface deployment result
+    - name: Display SVI interface deployment result (AGGREGATION)
       ansible.builtin.debug:
         msg: |
-          SVI Interface Deployment Result:
-          - Changed: {{ svi_deploy_result.changed | default(false) }}
-          - Response: {{ svi_deploy_result.response | default([]) | length }} operation(s)
-          {% if svi_deploy_result.diff is defined %}
-          - Diff: {{ svi_deploy_result.diff | length }} difference(s) detected
+          Aggregation SVI Interface Deployment Result:
+          - Changed: {{ svi_deploy_result_agg.changed | default(false) }}
+          - Response: {{ svi_deploy_result_agg.response | default([]) | length }} operation(s)
+          {% if svi_deploy_result_agg.diff is defined %}
+          - Diff: {{ svi_deploy_result_agg.diff | length }} difference(s) detected
           {% endif %}
-      when: svi_deploy_result is defined
+      when: svi_deploy_result_agg is defined
+
+    - name: Configure SVI interfaces (ACCESS/POAP) via dcnm_interface with check_deploy=false
+      cisco.dcnm.dcnm_interface:
+        fabric: "{{ fabrics_to_process[0] }}"
+        state: replaced
+        check_deploy: false
+        config: "{{ svi_interface_config_access }}"
+      when:
+        - switches_to_provision | length > 0
+        - svi_interface_config_access is defined
+        - svi_interface_config_access | length > 0
+        - fabrics_to_process | length > 0
+      register: svi_deploy_result_access
+
+    - name: Display SVI interface deployment result (ACCESS/POAP)
+      ansible.builtin.debug:
+        msg: |
+          Access/POAP SVI Interface Deployment Result:
+          - Changed: {{ svi_deploy_result_access.changed | default(false) }}
+          - Response: {{ svi_deploy_result_access.response | default([]) | length }} operation(s)
+          - Note: Deployment check skipped for POAP switches - policies will deploy after bootstrap
+      when: svi_deploy_result_access is defined

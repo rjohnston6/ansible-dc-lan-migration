@@ -1,0 +1,345 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="app.diagrams.net" modified="2026-01-27T00:00:00.000Z" agent="draw.io" version="22.0.0" type="device">
+  <diagram name="1.0-provision-switches" id="provision-switches-logic">
+    <mxGraphModel dx="1434" dy="836" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1200" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        
+        <!-- Title -->
+        <mxCell id="title" value="1.0-provision-switches.yml Logic Flow" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=24;fontStyle=1;fontColor=#FF9933;" vertex="1" parent="1">
+          <mxGeometry x="500" y="20" width="600" height="40" as="geometry" />
+        </mxCell>
+        
+        <!-- Start -->
+        <mxCell id="start" value="START" style="ellipse;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#FF9933;fontStyle=1;fontColor=#FF9933;" vertex="1" parent="1">
+          <mxGeometry x="740" y="80" width="120" height="50" as="geometry" />
+        </mxCell>
+        
+        <!-- Build switches list -->
+        <mxCell id="build_list" value="Build list of switches where&#xa;add_to_fabric = true" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#FF9933;fontColor=#FF9933;" vertex="1" parent="1">
+          <mxGeometry x="700" y="160" width="200" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="edge1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#FF9933;" edge="1" parent="1" source="start" target="build_list">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <!-- Decision: Any switches? -->
+        <mxCell id="dec_any" value="switches_to_provision&#xa;&gt; 0?" style="rhombus;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#FF9933;fontColor=#FF9933;" vertex="1" parent="1">
+          <mxGeometry x="720" y="250" width="160" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="edge2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#FF9933;" edge="1" parent="1" source="build_list" target="dec_any">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <!-- No switches - End -->
+        <mxCell id="end_no" value="END&#xa;(No switches)" style="ellipse;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#FF9933;fontColor=#FF9933;" vertex="1" parent="1">
+          <mxGeometry x="940" y="255" width="100" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="edge_no" value="No" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#FF9933;fontColor=#FF9933;" edge="1" parent="1" source="dec_any" target="end_no">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <!-- Separate switches -->
+        <mxCell id="separate" value="Separate switches by&#xa;provisioning method" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#FF9933;fontColor=#FF9933;" vertex="1" parent="1">
+          <mxGeometry x="700" y="370" width="200" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="edge3" value="Yes" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#FF9933;fontColor=#FF9933;" edge="1" parent="1" source="dec_any" target="separate">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <!-- Criteria Box -->
+        <mxCell id="criteria" value="POAP: destination_switch_sn,&#xa;destination_switch_model,&#xa;destination_switch_version defined&#xa;&#xa;Discovery: No destination_switch_sn" style="shape=note;whiteSpace=wrap;html=1;size=14;verticalAlign=top;align=left;spacingLeft=5;fillColor=none;strokeColor=#FF9933;fontSize=10;fontColor=#FF9933;" vertex="1" parent="1">
+          <mxGeometry x="920" y="350" width="200" height="100" as="geometry" />
+        </mxCell>
+        
+        <!-- Load data -->
+        <mxCell id="load_data" value="Load fabric data:&#xa;• static_routes.yml (gateway)&#xa;• l3_interfaces.yml (IP prefix)&#xa;• switch_details.yml (serial)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#FF9933;align=left;spacingLeft=10;fontColor=#FF9933;" vertex="1" parent="1">
+          <mxGeometry x="680" y="470" width="240" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="edge4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#FF9933;" edge="1" parent="1" source="separate" target="load_data">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <!-- Split into two paths -->
+        <mxCell id="split" value="" style="ellipse;whiteSpace=wrap;html=1;fillColor=#FF9933;strokeColor=#FF9933;" vertex="1" parent="1">
+          <mxGeometry x="790" y="580" width="20" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="edge5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#FF9933;" edge="1" parent="1" source="load_data" target="split">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <!-- ==================== POAP PATH (Left) ==================== -->
+        
+        <!-- POAP Header -->
+        <mxCell id="poap_header" value="POAP WORKFLOW&#xa;(tag: preprovision-switches)" style="text;html=1;strokeColor=#FF9933;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=1;fontStyle=1;fontColor=#FF9933;" vertex="1" parent="1">
+          <mxGeometry x="180" y="620" width="200" height="40" as="geometry" />
+        </mxCell>
+        
+        <!-- Decision: POAP switches? -->
+        <mxCell id="dec_poap" value="switches_for_poap&#xa;&gt; 0?" style="rhombus;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#FF9933;fontColor=#FF9933;" vertex="1" parent="1">
+          <mxGeometry x="200" y="680" width="160" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="edge_split_poap" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#FF9933;" edge="1" parent="1" source="split" target="dec_poap">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="280" y="590" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        
+        <!-- Build preprovision profiles -->
+        <mxCell id="build_poap" value="Build preprovision profiles:&#xa;• hostname, serial, model, version&#xa;• IP, role, gateway (with prefix)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#FF9933;align=left;spacingLeft=10;fontColor=#FF9933;" vertex="1" parent="1">
+          <mxGeometry x="160" y="790" width="240" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="edge_poap1" value="Yes" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#FF9933;fontColor=#FF9933;" edge="1" parent="1" source="dec_poap" target="build_poap">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <!-- Query existing POAP -->
+        <mxCell id="query_poap" value="Query NDFC fabric inventory&#xa;GET /fabrics/{fabric}/inventory" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#FF9933;fontColor=#FF9933;" vertex="1" parent="1">
+          <mxGeometry x="175" y="890" width="210" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="edge_poap2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#FF9933;" edge="1" parent="1" source="build_poap" target="query_poap">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <!-- Filter existing POAP -->
+        <mxCell id="filter_poap" value="Filter: Remove switches where&#xa;serial_number in existing_switch_serials" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#FF9933;fontColor=#FF9933;" vertex="1" parent="1">
+          <mxGeometry x="155" y="970" width="250" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="edge_poap3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#FF9933;" edge="1" parent="1" source="query_poap" target="filter_poap">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <!-- Decision: New POAP? -->
+        <mxCell id="dec_new_poap" value="New switches&#xa;to preprovision?" style="rhombus;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#FF9933;fontColor=#FF9933;" vertex="1" parent="1">
+          <mxGeometry x="200" y="1050" width="160" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="edge_poap4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#FF9933;" edge="1" parent="1" source="filter_poap" target="dec_new_poap">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <!-- POST POAP API -->
+        <mxCell id="post_poap" value="POST to NDFC POAP API&#xa;/fabrics/{fabric}/inventory/poap&#xa;&#xa;Template: 1.0-preprovision-new-switches.j2" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#FF9933;align=center;fontColor=#FF9933;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="155" y="1160" width="250" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="edge_poap5" value="Yes" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#FF9933;fontColor=#FF9933;" edge="1" parent="1" source="dec_new_poap" target="post_poap">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <!-- POAP complete -->
+        <mxCell id="poap_done" value="Store POAP hostnames&#xa;(exclude from role assignment)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#FF9933;fontColor=#FF9933;" vertex="1" parent="1">
+          <mxGeometry x="175" y="1270" width="210" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="edge_poap6" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#FF9933;" edge="1" parent="1" source="post_poap" target="poap_done">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <!-- ==================== DISCOVERY PATH (Right) ==================== -->
+        
+        <!-- Discovery Header -->
+        <mxCell id="disc_header" value="DISCOVERY WORKFLOW&#xa;(tag: discover-switches)" style="text;html=1;strokeColor=#FF9933;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=1;fontStyle=1;fontColor=#FF9933;" vertex="1" parent="1">
+          <mxGeometry x="1020" y="620" width="200" height="40" as="geometry" />
+        </mxCell>
+        
+        <!-- Decision: Discovery switches? -->
+        <mxCell id="dec_disc" value="switches_for_discovery&#xa;&gt; 0?" style="rhombus;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#FF9933;fontColor=#FF9933;" vertex="1" parent="1">
+          <mxGeometry x="1040" y="680" width="160" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="edge_split_disc" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#FF9933;" edge="1" parent="1" source="split" target="dec_disc">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1120" y="590" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        
+        <!-- Build discovery profiles -->
+        <mxCell id="build_disc" value="Build discovery profiles:&#xa;• hostname, IP, role&#xa;• serial, model from switch_details.yml" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#FF9933;align=left;spacingLeft=10;fontColor=#FF9933;" vertex="1" parent="1">
+          <mxGeometry x="1000" y="790" width="240" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="edge_disc1" value="Yes" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#FF9933;fontColor=#FF9933;" edge="1" parent="1" source="dec_disc" target="build_disc">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <!-- Query existing managed -->
+        <mxCell id="query_disc" value="Query NDFC fabric inventory&#xa;GET /fabrics/{fabric}/inventory" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#FF9933;fontColor=#FF9933;" vertex="1" parent="1">
+          <mxGeometry x="1015" y="890" width="210" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="edge_disc2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#FF9933;" edge="1" parent="1" source="build_disc" target="query_disc">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <!-- Filter existing managed -->
+        <mxCell id="filter_disc" value="Filter: Remove switches where&#xa;ip_address in existing_managed_ips" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#FF9933;fontColor=#FF9933;" vertex="1" parent="1">
+          <mxGeometry x="995" y="970" width="250" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="edge_disc3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#FF9933;" edge="1" parent="1" source="query_disc" target="filter_disc">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <!-- Decision: New discovery? -->
+        <mxCell id="dec_new_disc" value="New switches&#xa;to discover?" style="rhombus;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#FF9933;fontColor=#FF9933;" vertex="1" parent="1">
+          <mxGeometry x="1040" y="1050" width="160" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="edge_disc4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#FF9933;" edge="1" parent="1" source="filter_disc" target="dec_new_disc">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <!-- POST Discovery API -->
+        <mxCell id="post_disc" value="POST to NDFC Manage API&#xa;/manage/fabrics/{fabric}/switches&#xa;&#xa;preserveConfig: true&#xa;timeout: 300s" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#FF9933;align=center;fontColor=#FF9933;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="995" y="1160" width="250" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="edge_disc5" value="Yes" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#FF9933;fontColor=#FF9933;" edge="1" parent="1" source="dec_new_disc" target="post_disc">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <!-- ==================== ROLE ASSIGNMENT (Center-Right) ==================== -->
+        
+        <!-- Role Header -->
+        <mxCell id="role_header" value="ROLE ASSIGNMENT&#xa;(tag: assign-roles)" style="text;html=1;strokeColor=#FF9933;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=1;fontStyle=1;fontColor=#FF9933;" vertex="1" parent="1">
+          <mxGeometry x="600" y="1350" width="200" height="40" as="geometry" />
+        </mxCell>
+        
+        <!-- Merge point -->
+        <mxCell id="merge" value="" style="ellipse;whiteSpace=wrap;html=1;fillColor=#FF9933;strokeColor=#FF9933;" vertex="1" parent="1">
+          <mxGeometry x="690" y="1420" width="20" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="edge_merge1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#FF9933;" edge="1" parent="1" source="poap_done" target="merge">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="280" y="1430" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="edge_merge2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#FF9933;" edge="1" parent="1" source="post_disc" target="merge">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1120" y="1430" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        
+        <!-- Skip paths -->
+        <mxCell id="edge_skip_poap" value="No" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;dashed=1;strokeColor=#FF9933;fontColor=#FF9933;" edge="1" parent="1" source="dec_new_poap" target="merge">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="100" y="1090" />
+              <mxPoint x="100" y="1430" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="edge_skip_disc" value="No" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;dashed=1;strokeColor=#FF9933;fontColor=#FF9933;" edge="1" parent="1" source="dec_new_disc" target="merge">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1300" y="1090" />
+              <mxPoint x="1300" y="1430" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="edge_skip_poap_all" value="No" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;dashed=1;strokeColor=#FF9933;fontColor=#FF9933;" edge="1" parent="1" source="dec_poap" target="merge">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="100" y="720" />
+              <mxPoint x="100" y="1430" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="edge_skip_disc_all" value="No" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;dashed=1;strokeColor=#FF9933;fontColor=#FF9933;" edge="1" parent="1" source="dec_disc" target="merge">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1300" y="720" />
+              <mxPoint x="1300" y="1430" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        
+        <!-- Build role assignments -->
+        <mxCell id="build_roles" value="Build role assignments from switch_details&#xa;EXCLUDE: POAP switches (role set during preprovision)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#FF9933;fontColor=#FF9933;" vertex="1" parent="1">
+          <mxGeometry x="520" y="1470" width="360" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="edge_role1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#FF9933;" edge="1" parent="1" source="merge" target="build_roles">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <!-- Decision: Any roles? -->
+        <mxCell id="dec_roles" value="switches need&#xa;role assignment?" style="rhombus;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#FF9933;fontColor=#FF9933;" vertex="1" parent="1">
+          <mxGeometry x="620" y="1550" width="160" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="edge_role2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#FF9933;" edge="1" parent="1" source="build_roles" target="dec_roles">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <!-- POST roles API -->
+        <mxCell id="post_roles" value="POST to NDFC Roles API&#xa;/control/switches/roles&#xa;&#xa;[{&quot;role&quot;: &quot;...&quot;, &quot;serialNumber&quot;: &quot;...&quot;}]" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#FF9933;align=center;fontColor=#FF9933;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="560" y="1670" width="280" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="edge_role3" value="Yes" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#FF9933;fontColor=#FF9933;" edge="1" parent="1" source="dec_roles" target="post_roles">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <!-- End -->
+        <mxCell id="end" value="END" style="ellipse;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#FF9933;fontStyle=1;fontColor=#FF9933;" vertex="1" parent="1">
+          <mxGeometry x="640" y="1790" width="120" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="edge_end1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#FF9933;" edge="1" parent="1" source="post_roles" target="end">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge_end2" value="No" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;dashed=1;strokeColor=#FF9933;fontColor=#FF9933;" edge="1" parent="1" source="dec_roles" target="end">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="860" y="1590" />
+              <mxPoint x="860" y="1815" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        
+        <!-- Legend -->
+        <mxCell id="legend" value="LEGEND" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontStyle=1;fontSize=12;fontColor=#FF9933;" vertex="1" parent="1">
+          <mxGeometry x="1280" y="80" width="100" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="leg1" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#FF9933;" vertex="1" parent="1">
+          <mxGeometry x="1280" y="110" width="30" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="leg1t" value="Process/Task" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=10;fontColor=#FF9933;" vertex="1" parent="1">
+          <mxGeometry x="1320" y="110" width="100" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="leg2" value="" style="rhombus;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#FF9933;" vertex="1" parent="1">
+          <mxGeometry x="1280" y="140" width="30" height="25" as="geometry" />
+        </mxCell>
+        <mxCell id="leg2t" value="Decision" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=10;fontColor=#FF9933;" vertex="1" parent="1">
+          <mxGeometry x="1320" y="140" width="100" height="25" as="geometry" />
+        </mxCell>
+        <mxCell id="leg3" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#FF9933;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="1280" y="175" width="30" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="leg3t" value="API Call (thick border)" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=10;fontColor=#FF9933;" vertex="1" parent="1">
+          <mxGeometry x="1320" y="175" width="120" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="leg4" value="" style="ellipse;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#FF9933;" vertex="1" parent="1">
+          <mxGeometry x="1280" y="205" width="30" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="leg4t" value="Start/End" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=10;fontColor=#FF9933;" vertex="1" parent="1">
+          <mxGeometry x="1320" y="205" width="100" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="leg5" value="" style="endArrow=classic;html=1;dashed=1;strokeColor=#FF9933;" edge="1" parent="1">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="1280" y="245" as="sourcePoint" />
+            <mxPoint x="1310" y="245" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="leg5t" value="Skip path" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=10;fontColor=#FF9933;" vertex="1" parent="1">
+          <mxGeometry x="1320" y="235" width="100" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="leg6" value="" style="ellipse;whiteSpace=wrap;html=1;fillColor=#FF9933;strokeColor=#FF9933;" vertex="1" parent="1">
+          <mxGeometry x="1280" y="265" width="30" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="leg6t" value="Split/Merge point" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=10;fontColor=#FF9933;" vertex="1" parent="1">
+          <mxGeometry x="1320" y="265" width="100" height="20" as="geometry" />
+        </mxCell>
+        
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

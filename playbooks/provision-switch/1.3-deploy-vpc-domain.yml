@@ -241,6 +241,7 @@
       loop_control:
         label: "Domain {{ item.DOMAIN_ID }}: {{ item.PEER1_NAME }} <-> {{ item.PEER2_NAME }}"
       register: vpc_create_results
+      ignore_errors: true
       when: vpc_domains_to_create | default([]) | length > 0
 
     - name: Display VPC creation results

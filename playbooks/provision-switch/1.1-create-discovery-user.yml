@@ -168,7 +168,7 @@
       register: existing_policies_query
       ignore_errors: true
 
-    - name: Build set of switches with existing switch_user policy
+    - name: Build set of switches with existing discovery user policy
       ansible.builtin.set_fact:
         existing_switch_user_serials: |
           {%- set serials_with_policy = [] -%}
@@ -177,7 +177,10 @@
               {%- set serial = result.item -%}
               {%- for policy in result.current -%}
                 {%- if policy.templateName is defined and policy.templateName == 'switch_user' -%}
-                  {%- set _ = serials_with_policy.append(serial) -%}
+                  {%- set policy_username = policy.nvPairs.USERNAME | default('') -%}
+                  {%- if policy_username == discovery_username -%}
+                    {%- set _ = serials_with_policy.append(serial) -%}
+                  {%- endif -%}
                 {%- endif -%}
               {%- endfor -%}
             {%- endif -%}

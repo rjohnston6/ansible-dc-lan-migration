@@ -184,7 +184,8 @@
                   {%- set _ = matching_routes.append(route) -%}
                 {%- endif -%}
               {%- endfor -%}
-              {%- set default_route = matching_routes | first | default({}) -%}
+              {# Fallback to any default route if no interface-specific route found #}
+              {%- set default_route = matching_routes | first | default(all_default_routes | first | default({})) -%}
               {%- set gateway_ip = default_route.next_hop | default('') -%}
               {# Get management interface prefix from l3_interfaces_lookup #}
               {%- set l3_data = l3_interfaces_lookup.get(hostname, {}) -%}
@@ -323,6 +324,28 @@
           {% endif %}
           {% endfor %}
       when: preprovision_results is defined
+
+    # Capture POAP switch hostnames to exclude from role assignment
+    # POAP switches already have roles assigned during pre-provisioning
+    # Note: We use hostnames because destination_switch_sn differs from license_hostid in switch_details.yml
+    - name: Build list of POAP switch hostnames
+      ansible.builtin.set_fact:
+        poap_switch_hostnames: |
+          {%- set hostnames = [] -%}
+          {%- for profile in preprovision_profiles | default([]) -%}
+            {%- if profile.hostname is defined -%}
+              {%- set _ = hostnames.append(profile.hostname) -%}
+            {%- endif -%}
+          {%- endfor -%}
+          {{ hostnames }}
+      when: preprovision_profiles is defined
+
+    - name: Display POAP switches excluded from role assignment
+      ansible.builtin.debug:
+        msg: |
+          POAP switches (role already assigned during pre-provisioning): {{ poap_switch_hostnames | length }}
+          Hostnames: {{ poap_switch_hostnames | join(', ') if poap_switch_hostnames | length > 0 else 'None' }}
+      when: poap_switch_hostnames is defined and poap_switch_hostnames | length > 0
 
     #==========================================================================
     # DISCOVERY WORKFLOW - For existing switches without destination_switch_sn
@@ -565,19 +588,24 @@
     #==========================================================================
 
     # Build role assignment list from switch_details lookup
+    # IMPORTANT: Excludes POAP switches - their roles are assigned during pre-provisioning
     - name: Build switch role assignments
       ansible.builtin.set_fact:
         switch_role_assignments: |
           {%- set assignments = [] -%}
+          {%- set poap_hosts = poap_switch_hostnames | default([]) -%}
           {%- for ip, details in switch_details_lookup.items() if switch_details_lookup is defined -%}
             {%- if details.role is defined and details.license_hostid is defined -%}
-              {%- set _ = assignments.append({
-                'fabric': details.fabric | default(''),
-                'hostname': details.hostname,
-                'ip_address': ip,
-                'serial_number': details.license_hostid,
-                'role': details.role
-              }) -%}
+              {# Skip POAP switches - their roles are already set during pre-provisioning #}
+              {%- if details.hostname not in poap_hosts -%}
+                {%- set _ = assignments.append({
+                  'fabric': details.fabric | default(''),
+                  'hostname': details.hostname,
+                  'ip_address': ip,
+                  'serial_number': details.license_hostid,
+                  'role': details.role
+                }) -%}
+              {%- endif -%}
             {%- endif -%}
           {%- endfor -%}
           {{ assignments }}

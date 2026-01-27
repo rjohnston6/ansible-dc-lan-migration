@@ -4,7 +4,7 @@ Template: Bootstrap Switch Configuration (JSON Payload)
 ================================================================================
 Purpose:
   Generate JSON payload for the NDFC REST API to bootstrap a switch that has
-  connected via POAP.
+  connected via POAP. Includes Day-0 CLI configuration for port-channels.
 
 API Endpoint:
   POST /appcenter/cisco/ndfc/api/v1/lan-fabric/rest/control/fabrics/<fabric>/inventory/poap
@@ -18,6 +18,7 @@ Input Variables:
   password                   - Switch admin password
   role                       - Switch role (access, aggregation, etc.)
   gateway                    - Default gateway with prefix (e.g., 198.18.24.65/26)
+  port_channels              - List of port-channel configurations
   poap_data                  - POAP data from discovery (JSON string)
   fingerprint                - SSH fingerprint from POAP discovery
   public_key                 - SSH public key from POAP discovery
@@ -25,8 +26,39 @@ Input Variables:
 Notes:
   - reAdd is set to true to re-import the switch with updated configuration
   - discoveryAuthProtocol: 0 for password auth
+  - Day-0 config includes port-channel creation and member interface configuration
 ================================================================================
 #}
+{%- set config_lines = [] -%}
+{%- if port_channels is defined and port_channels | length > 0 -%}
+  {%- for pc in port_channels -%}
+    {%- set pc_name = pc.name | regex_replace('^[Pp]ort-[Cc]hannel', 'port-channel') | regex_replace('^[Pp]o', 'port-channel') | regex_replace('port-channel', 'Po') -%}
+    {%- set pc_number = pc.name | regex_replace('[^0-9]', '') -%}
+    {%- set _ = config_lines.append('interface Port-channel' + pc_number) -%}
+    {%- set _ = config_lines.append('  description ' + (pc.description | default('Port-Channel ' + pc_number))) -%}
+    {%- if pc.mode | default('') == 'trunk' -%}
+      {%- set _ = config_lines.append('  mode trunk') -%}
+      {%- if pc.trunk.allowed_vlans is defined -%}
+        {%- set _ = config_lines.append('  switchport trunk allowed vlan ' + (pc.trunk.allowed_vlans | string)) -%}
+      {%- endif -%}
+      {%- if pc.trunk.native_vlan is defined -%}
+        {%- set _ = config_lines.append('  switchport trunk native vlan ' + (pc.trunk.native_vlan | string)) -%}
+      {%- endif -%}
+    {%- endif -%}
+    {%- set _ = config_lines.append('  no shutdown') -%}
+    {# Configure member interfaces #}
+    {%- if pc.members is defined -%}
+      {%- for member in pc.members -%}
+        {%- set iface = member.interface | regex_replace('^[Ee]thernet', 'Ethernet') -%}
+        {%- set _ = config_lines.append('interface ' + iface) -%}
+        {%- set _ = config_lines.append('  channel-group ' + pc_number + ' mode ' + (member.mode | default('active'))) -%}
+        {%- set _ = config_lines.append('  no shutdown') -%}
+      {%- endfor -%}
+    {%- endif -%}
+  {%- endfor -%}
+{%- endif -%}
+{%- set config_string = config_lines | join('\n') -%}
+
 [
   {
     "serialNumber": "{{ serial_number }}",
@@ -40,6 +72,7 @@ Notes:
     "fingerprint": "{{ fingerprint | default('') }}",
     "publicKey": "{{ public_key | default('') }}",
     "reAdd": true,
-    "role": "{{ role }}"
+    "role": "{{ role }}"{% if config_string | length > 0 %},
+    "config": {{ config_string | to_json }}{% endif %}
   }
 ]
