@@ -4,7 +4,7 @@ collections:
   - name: cisco.nd
     version: ">=1.3.0"
   - name: cisco.dcnm
-    version: ">=3.5.0"
+    version: ">=3.9.0"  # Required for ND 4.1+ compatibility
   - name: community.general
     version: ">=6.4.0"
   - name: cisco.nxos
