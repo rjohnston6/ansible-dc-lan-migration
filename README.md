@@ -61,12 +61,15 @@ cd ansible-dc-lan-migration
 uv sync && source .venv/bin/activate
 ansible-galaxy collection install -r requirements.yml
 
-# 2. Configure vault
+# 2. Configure inventory (copy examples and customize)
+cp -r inventory.example inventory
 echo "your-password" > .vault_pass
 ansible-vault edit inventory/group_vars/all/vault.yml
 
-# 3. Run full provisioning
-ansible-playbook playbooks/provision-switch/0.0-full-provision-switch.yml
+# 3. Run provisioning playbooks in sequence
+ansible-playbook playbooks/provision-switch/1.0-provision-switches.yml
+ansible-playbook playbooks/provision-switch/1.1-create-discovery-user.yml
+# ... continue with 1.2 through 1.8
 ```
 
 ---
@@ -75,8 +78,9 @@ ansible-playbook playbooks/provision-switch/0.0-full-provision-switch.yml
 
 ```
 ansible-dc-lan-migration/
-├── fabrics/                                    # Generated artifacts per fabric
+├── fabrics/                                    # Generated artifacts per fabric (gitignored)
 │   └── <fabric-name>/
+│       ├── switch_details.yml                  # Switch hardware info (serial, model, version)
 │       ├── switch_features.yml                 # Enabled NX-OS features
 │       ├── vlan_database.yml                   # VLAN configurations
 │       ├── l2_interfaces.yml                   # L2 interface configs
@@ -84,7 +88,7 @@ ansible-dc-lan-migration/
 │       ├── l3_interfaces.yml                   # L3 interface configs (SVIs, loopbacks, routed)
 │       └── static_routes.yml                   # Static route configurations
 │
-├── inventory/
+├── inventory/                                  # Actual inventory (gitignored - contains secrets)
 │   ├── hosts.yml                               # Switch and ND host definitions
 │   ├── group_vars/
 │   │   ├── all/vault.yml                       # Encrypted credentials
@@ -92,14 +96,21 @@ ansible-dc-lan-migration/
 │   └── host_vars/nexus_dashboard/
 │       └── fabric_definitions.yml              # Fabric source of truth
 │
+├── inventory.example/                          # Example inventory templates (copy to inventory/)
+│   ├── hosts.yml
+│   ├── group_vars/
+│   │   ├── all/vault.yml
+│   │   └── nd/connection.yml
+│   └── host_vars/nexus_dashboard/
+│       └── fabric_definitions.yml
+│
 ├── playbooks/
 │   ├── discovery/                              # Profile existing switches
 │   │   └── 1.0-profile-existing-switches.yml
 │   ├── provision-fabric/                       # Fabric configuration
 │   │   └── 1.0-configure-nd-fabric.yml
 │   └── provision-switch/                       # Switch provisioning workflow
-│       ├── 0.0-full-provision-switch.yml       # Master orchestration playbook
-│       ├── 1.0-preprovision-new-switches.yml
+│       ├── 1.0-provision-switches.yml          # Add switches to NDFC (POAP or Discovery)
 │       ├── 1.1-create-discovery-user.yml
 │       ├── 1.2-provision-features.yml
 │       ├── 1.3-deploy-vpc-domain.yml
@@ -122,20 +133,19 @@ ansible-dc-lan-migration/
 
 ### Switch Provisioning Workflow (provision-switch/)
 
-The master playbook `0.0-full-provision-switch.yml` executes all playbooks in sequence. You can also run individual playbooks as needed.
+Run playbooks individually in sequence (1.0 → 1.8). For POAP workflows, run 1.0-1.6 first, then wait for switches to boot before running 1.7-1.8.
 
 | # | Playbook | Template(s) | Description |
 |---|----------|-------------|-------------|
-| 0.0 | `full-provision-switch.yml` | — | Master orchestration playbook that executes all provisioning steps 1.0-1.8 in sequence |
-| 1.0 | `provision-switches.yml` | `1.0-preprovision-new-switches.json.j2` | Adds switches to NDFC (see [How Switches Are Added](#how-switches-are-added-to-ndfc) below) |
-| 1.1 | `create-discovery-user.yml` | `1.1-create-discovery-user.json.j2` | Create NDFC discovery user (switch_user policy) for switch authentication during discovery |
-| 1.2 | `provision-features.yml` | `1.2-provision-features.json.j2` | Configure NX-OS feature policies (LACP, LLDP, interface-vlan, etc.) using feature_lookup.yml mapping |
+| 1.0 | `provision-switches.yml` | Inline Jinja2 | Adds switches to NDFC (see [How Switches Are Added](#how-switches-are-added-to-ndfc) below) |
+| 1.1 | `create-discovery-user.yml` | `1.1-create-discovery-user.j2` | Create NDFC discovery user (switch_user policy) for switch authentication during discovery |
+| 1.2 | `provision-features.yml` | `1.2-provision-features.j2` | Configure NX-OS feature policies (LACP, LLDP, interface-vlan, etc.) using feature_lookup.yml mapping |
 | 1.3 | `deploy-vpc-domain.yml` | `1.3-deploy-vpc-domain.json.j2` | Deploy VPC domain configuration between aggregation switch pairs |
-| 1.4 | `provision-interfaces.yml` | `1.4-provision-interfaces-*.json.j2` | Configure L2/L3 interfaces (Ethernet, port-channels, VPC, SVI) with trunk/access/routed modes |
-| 1.5 | `provision-vlan-policies.yml` | `1.5-provision-vlan-policies.json.j2` | Deploy VLAN policies from vlan_database.yml to switches |
-| 1.6 | `provision-default-route.yml` | `1.6-provision-default-route.json.j2` | Configure static default route (0.0.0.0/0) via management gateway |
+| 1.4 | `provision-interfaces.yml` | `1.4-provision-interfaces-*.j2` | Configure L2/L3 interfaces (Ethernet, port-channels, VPC, SVI) with trunk/access/routed modes |
+| 1.5 | `provision-vlan-policies.yml` | `1.5-provision-vlan-policies.j2` | Deploy VLAN policies from vlan_database.yml to switches |
+| 1.6 | `provision-default-route.yml` | `1.6-provision-default-route.j2` | Configure static default route (0.0.0.0/0) via management gateway |
 | 1.7 | `check-poap-status.yml` | — | Query POAP inventory to check if switches have connected and are ready for bootstrap |
-| 1.8 | `bootstrap-switches.yml` | `1.8-bootstrap-switches.json.j2` | Bootstrap pre-provisioned switches via POAP API to deploy Day-0 configuration |
+| 1.8 | `bootstrap-switches.yml` | `1.8-bootstrap-switches.j2` | Bootstrap pre-provisioned switches via POAP API to deploy Day-0 configuration |
 
 ### How Switches Are Added to NDFC
 

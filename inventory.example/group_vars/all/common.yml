@@ -1,0 +1,9 @@
+---
+#  Common configuratoins for all hosts
+
+# Set the timeouts for Ansible commands and connections to 5 minutes (300 seconds)
+ansible_command_timeout: 300
+ansible_connect_timeout: 300
+
+# SSH settings
+ansible_ssh_common_args: '-o StrictHostKeyChecking=no'

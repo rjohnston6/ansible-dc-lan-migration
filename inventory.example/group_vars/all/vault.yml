@@ -1,0 +1,17 @@
+---
+# Example vault file - REPLACE WITH YOUR ACTUAL VALUES
+# Encrypt this file with: ansible-vault encrypt inventory/group_vars/all/vault.yml
+
+# Switch credentials (for NX-OS SSH access)
+vault_switch_password: "YOUR_SWITCH_PASSWORD"
+
+# Nexus Dashboard credentials
+vault_nd_password: "YOUR_ND_PASSWORD"
+
+# Discovery user credentials (created on switches for NDFC discovery)
+vault_nd_discovery_user: "ndfc"
+vault_nd_discovery_password: "YOUR_DISCOVERY_PASSWORD"
+
+# SNMP credentials (if using SNMPv3)
+vault_snmp_auth_password: "YOUR_SNMP_AUTH_PASSWORD"
+vault_snmp_priv_password: "YOUR_SNMP_PRIV_PASSWORD"
