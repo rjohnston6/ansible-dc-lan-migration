@@ -52,15 +52,23 @@
     # Phase 1: Early exit check
     # ========================================================================
 
+    - name: Set target fabric name from nd_fabrics
+      ansible.builtin.set_fact:
+        target_fabric: "{{ nd_fabrics[0].FABRIC_NAME }}"
+
+    - name: Filter VPC domains to target fabric only
+      ansible.builtin.set_fact:
+        vpc_domains_filtered: "{{ vpc_domains | default([]) | selectattr('FABRIC_NAME', 'equalto', target_fabric) | list }}"
+
     - name: End play if no VPC domains defined
       ansible.builtin.meta: end_play
-      when: vpc_domains | default([]) | length == 0
+      when: vpc_domains_filtered | length == 0
 
     # ========================================================================
     # Phase 2: Query switches to get IP addresses and serial numbers
     # ========================================================================
 
-    - name: Query all switches in each fabric
+    - name: Query all switches in target fabric
       cisco.nd.nd_rest:
         host: "{{ ansible_host }}"
         username: "{{ ansible_user }}"
@@ -69,30 +77,21 @@
         validate_certs: "{{ ansible_httpapi_validate_certs }}"
         use_proxy: "{{ ansible_httpapi_use_proxy }}"
         login_domain: "{{ ansible_httpapi_login_domain }}"
-        path: "/api/v1/manage/fabrics/{{ item }}/switches"
+        path: "/api/v1/manage/fabrics/{{ target_fabric }}/switches"
         method: GET
-      loop: "{{ vpc_domains | map(attribute='FABRIC_NAME') | unique | list }}"
-      loop_control:
-        label: "{{ item }}"
       register: fabric_switches_query
 
-    - name: Build switch lookup by fabric and IP address
+    - name: Build switch lookup by IP address
       ansible.builtin.set_fact:
         switch_lookup: |
-          {%- set lookup = {} -%}
-          {%- for result in fabric_switches_query.results | default([]) -%}
-            {%- set fabric = result.item -%}
-            {%- if fabric not in lookup -%}
-              {%- set _ = lookup.update({fabric: {}}) -%}
-            {%- endif -%}
-            {%- if result.current is defined and result.current.switches is defined -%}
-              {%- for switch in result.current.switches -%}
-                {%- if switch.fabricManagementIp is defined -%}
-                  {%- set _ = lookup[fabric].update({switch.fabricManagementIp: {'serial': switch.serialNumber, 'ip': switch.fabricManagementIp, 'hostname': switch.hostname | default('')}}) -%}
-                {%- endif -%}
-              {%- endfor -%}
-            {%- endif -%}
-          {%- endfor -%}
+          {%- set lookup = {target_fabric: {}} -%}
+          {%- if fabric_switches_query.current is defined and fabric_switches_query.current.switches is defined -%}
+            {%- for switch in fabric_switches_query.current.switches -%}
+              {%- if switch.fabricManagementIp is defined -%}
+                {%- set _ = lookup[target_fabric].update({switch.fabricManagementIp: {'serial': switch.serialNumber, 'ip': switch.fabricManagementIp, 'hostname': switch.hostname | default('')}}) -%}
+              {%- endif -%}
+            {%- endfor -%}
+          {%- endif -%}
           {{ lookup }}
 
     # ========================================================================
@@ -103,7 +102,7 @@
       ansible.builtin.set_fact:
         vpc_domains_to_deploy: |
           {%- set domains = [] -%}
-          {%- for domain in vpc_domains -%}
+          {%- for domain in vpc_domains_filtered -%}
             {%- set fabric = domain.FABRIC_NAME -%}
             {%- if fabric in switch_lookup -%}
               {%- set fabric_switches = switch_lookup[fabric] -%}
@@ -131,7 +130,7 @@
           ═══════════════════════════════════════════════════════════════════════
           VPC DOMAIN DEPLOYMENT PLAN
           ═══════════════════════════════════════════════════════════════════════
-          Total defined: {{ vpc_domains | length }}
+          Total defined: {{ vpc_domains_filtered | length }}
           To deploy: {{ vpc_domains_to_deploy | length }}
           {% for domain in vpc_domains_to_deploy %}
           - {{ domain.FABRIC_NAME }}: Domain {{ domain.DOMAIN_ID }} ({{ domain.PEER1_NAME }} <-> {{ domain.PEER2_NAME }})

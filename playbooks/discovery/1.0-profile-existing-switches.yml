@@ -807,7 +807,7 @@
                   {%- set iface_type = 'pc' -%}
                 {%- endif -%}
                 {%- set has_config = false -%}
-                {%- if iface.mode is defined or iface.trunk is defined or iface.access is defined or iface.cdp_enable is defined -%}
+                {%- if iface_type == 'eth' or iface.mode is defined or iface.trunk is defined or iface.access is defined or iface.cdp_enable is defined -%}
                   {%- set has_config = true -%}
                 {%- endif -%}
                 {%- set matching_lag = lag_info | selectattr('name', 'equalto', iface.name) | list -%}

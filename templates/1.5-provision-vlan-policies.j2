@@ -24,12 +24,14 @@ Notes:
   - Each VLAN requires a separate API call
   - The create_vlan template is a built-in NDFC template
   - nvPairs contains VLAN and NAME variables for the template
+  - NAME field is sanitized: slashes and commas replaced with underscores
 ================================================================================
 #}
+{%- set sanitized_name = vlan_name | regex_replace('[/,]', '_') | regex_replace('[^a-zA-Z0-9_.-]', '') -%}
 {
   "nvPairs": {
     "VLAN": "{{ vlan_id }}",
-    "NAME": "{{ vlan_name }}"
+    "NAME": "{{ sanitized_name }}"
   },
   "entityName": "SWITCH",
   "entityType": "SWITCH",
