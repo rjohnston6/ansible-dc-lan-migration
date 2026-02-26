@@ -224,7 +224,7 @@
     # Generate switch_details.yml for each fabric with serial numbers and versions
     - name: Generate switch_details.yml for each fabric
       template:
-        src: ../../templates/switch_details.yml.j2
+        src: ../../templates/1.0-profile-existing-switches-switch_details.j2
         dest: "../../fabrics/{{ item.name }}/switch_details.yml"
       run_once: true
       delegate_to: localhost
@@ -335,7 +335,7 @@
     # Generate switch_features.yml file for each fabric
     - name: Generate switch_features.yml for each fabric
       template:
-        src: ../../templates/switch_features.j2
+        src: ../../templates/1.0-profile-existing-switches-switch_features.j2
         dest: "../../fabrics/{{ item.key }}/switch_features.yml"
       run_once: true
       delegate_to: localhost
@@ -436,7 +436,7 @@
     # Generate VLAN database YAML file for each fabric
     - name: Generate VLAN database YAML for each fabric
       template:
-        src: ../../templates/vlan_database.j2
+        src: ../../templates/1.0-profile-existing-switches-vlan_database.j2
         dest: "../../fabrics/{{ item.key }}/vlan_database.yml"
       run_once: true
       delegate_to: localhost
@@ -691,7 +691,7 @@
 
     - name: Generate L3 interfaces inventory YAML for each fabric
       template:
-        src: ../../templates/interfaces_inventory.j2
+        src: ../../templates/1.0-profile-existing-switches-interfaces_inventory.j2
         dest: "../../fabrics/{{ item.key }}/l3_interfaces.yml"
       run_once: true
       delegate_to: localhost
@@ -977,7 +977,7 @@
 
     - name: Generate VPC consolidated inventory YAML for each fabric
       template:
-        src: ../../templates/vpc_inventory.j2
+        src: ../../templates/1.0-profile-existing-switches-vpc_inventory.j2
         dest: "../../fabrics/{{ item.key }}/l2_vpc_interfaces.yml"
       run_once: true
       delegate_to: localhost
@@ -990,7 +990,7 @@
 
     - name: Generate L2 interfaces inventory YAML for each fabric
       template:
-        src: ../../templates/interfaces_inventory.j2
+        src: ../../templates/1.0-profile-existing-switches-interfaces_inventory.j2
         dest: "../../fabrics/{{ item.key }}/l2_interfaces.yml"
       run_once: true
       delegate_to: localhost
@@ -1188,7 +1188,7 @@
     # Generate static routes YAML for each fabric
     - name: Generate static_routes.yml for each fabric
       ansible.builtin.template:
-        src: ../../templates/static_routes.j2
+        src: ../../templates/1.0-profile-existing-switches-static_routes.j2
         dest: "../../fabrics/{{ item.key }}/static_routes.yml"
       run_once: true
       delegate_to: localhost
