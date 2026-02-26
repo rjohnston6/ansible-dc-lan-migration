@@ -5,7 +5,7 @@
 # Description:
 #   This playbook configures NX-OS feature policies on switches by:
 #   1. Loading switch_features.yml to get enabled features per switch
-#   2. Loading feature_lookup.yml to map features to NDFC templates
+#   2. Loading 1.2-provision-features-feature_lookup.yml to map features to NDFC templates
 #   3. Filtering switches with add_to_fabric: true
 #   4. Calling the policies/bulk-create API for each mapped feature
 #
@@ -16,7 +16,7 @@
 # Variables from switch_features.yml:
 #   - switches.<hostname>.features: List of enabled features
 #
-# Variables from feature_lookup.yml:
+# Variables from 1.2-provision-features-feature_lookup.yml:
 #   - feature_lookup.<feature>: NDFC template name for the feature
 #
 # API Endpoints Used:
@@ -68,7 +68,7 @@
     # Load feature lookup table
     - name: Load feature lookup table
       ansible.builtin.include_vars:
-        file: "{{ playbook_dir }}/../../templates/feature_lookup.yml"
+        file: "{{ playbook_dir }}/../../templates/1.2-provision-features-feature_lookup.yml"
       when: switches_to_provision | length > 0
 
     # Load switch features from all fabrics
@@ -169,13 +169,17 @@
           {%- for result in existing_policies_query.results | default([]) -%}
             {%- if result.current is defined and result.current is iterable -%}
               {%- set serial = result.item -%}
-              {%- set templates = [] -%}
+              {%- set keys = [] -%}
               {%- for policy in result.current -%}
                 {%- if policy.templateName is defined -%}
-                  {%- set _ = templates.append(policy.templateName) -%}
+                  {%- if policy.templateName == 'switch_freeform' and policy.description | default('') != '' -%}
+                    {%- set _ = keys.append('switch_freeform:' + policy.description) -%}
+                  {%- else -%}
+                    {%- set _ = keys.append(policy.templateName) -%}
+                  {%- endif -%}
                 {%- endif -%}
               {%- endfor -%}
-              {%- set _ = lookup.update({serial: templates}) -%}
+              {%- set _ = lookup.update({serial: keys}) -%}
             {%- endif -%}
           {%- endfor -%}
           {{ lookup }}
@@ -188,7 +192,12 @@
           {%- for policy in feature_policies -%}
             {%- set serial = policy.serial_number -%}
             {%- set existing = existing_policies_lookup.get(serial, []) -%}
-            {%- if policy.template_name not in existing -%}
+            {%- if policy.template_name == 'switch_freeform' -%}
+              {%- set key = 'switch_freeform:feature_' + policy.feature -%}
+              {%- if key not in existing -%}
+                {%- set _ = filtered.append(policy) -%}
+              {%- endif -%}
+            {%- elif policy.template_name not in existing -%}
               {%- set _ = filtered.append(policy) -%}
             {%- endif -%}
           {%- endfor -%}
@@ -202,6 +211,13 @@
         msg: |
           Feature policies to configure (excluding existing): {{ feature_policies_filtered | length }}
           Already configured (skipped): {{ (feature_policies | length) - (feature_policies_filtered | length) }}
+          {% set filtered_keys = feature_policies_filtered | map(attribute='hostname') | zip(feature_policies_filtered | map(attribute='feature')) | map('join', ':') | list %}
+          {% for policy in feature_policies %}
+          {% if (policy.hostname + ':' + policy.feature) not in filtered_keys %}
+            (skipped) {{ policy.hostname }}: {{ policy.feature }}
+          {% endif %}
+          {% endfor %}
+          To configure:
           {% for policy in feature_policies_filtered %}
           - {{ policy.hostname }}: {{ policy.feature }} -> {{ policy.template_name }}
           {% endfor %}
@@ -226,6 +242,7 @@
       vars:
         serial_number: "{{ item.serial_number }}"
         template_name: "{{ item.template_name }}"
+        feature: "{{ item.feature }}"
       when:
         - feature_policies_filtered is defined
         - feature_policies_filtered | length > 0

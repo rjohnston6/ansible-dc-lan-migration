@@ -20,17 +20,32 @@ Key Settings:
 
 Notes:
   - Each feature requires a separate API call
-  - Template names are mapped via feature_lookup.yml
+  - Template names are mapped via 1.2-provision-features-feature_lookup.yml
   - Only features with valid template mappings will be configured
+  - Features that do not have a dedicated NDFC policy template are deployed
+    using the switch_freeform template, which accepts arbitrary NX-OS CLI
+    via the nvPairs.CONF field. This allows any feature to be enabled even
+    when no specific NDFC template exists.
+
+  Freeform policy conventions (when templateName == 'switch_freeform'):
+    - nvPairs.CONF : Raw NX-OS CLI to push to the switch.
+                     Constructed as: "feature <nxos_feature_name>"
+                     e.g. "feature hsrp", "feature udld", "feature bash-shell"
+    - description  : Used as a unique idempotency key since all freeform
+                     policies share the same templateName. Constructed as:
+                     "feature_<nxos_feature_name>"
+                     e.g. "feature_hsrp", "feature_udld", "feature_bash-shell"
+                     The idempotency check in the playbook matches on
+                     "switch_freeform:<description>" to detect existing policies.
 ================================================================================
 #}
 {
-  "nvPairs": {},
+  "nvPairs": {% if template_name == 'switch_freeform' %}{"CONF": "feature {{ feature }}"}{% else %}{}{% endif %},
   "entityName": "SWITCH",
   "entityType": "SWITCH",
   "source": "",
   "priority": 500,
-  "description": "",
+  "description": "{% if template_name == 'switch_freeform' %}feature_{{ feature }}{% endif %}",
   "templateName": "{{ template_name }}",
   "serialNumber": "{{ serial_number }}"
 }
