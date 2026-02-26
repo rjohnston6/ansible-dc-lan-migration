@@ -1,13 +1,10 @@
 ---
-# Playbook: 02-configure-nd-fabric.yml
-# Purpose: Deploy fabric configurations to Nexus Dashboard (ND)
+# Playbook: 1.0-configure-nd-fabric.yml
+# Purpose: Deploy fabric configurations to Nexus Dashboard Fabric Controller (NDFC)
 #
 # Description:
-#   This playbook manages fabric creation on Nexus Dashboard by:
-#   1. Retrieving currently configured fabrics from ND
-#   2. Comparing with desired fabric definitions from host_vars
-#   3. Creating only new fabrics that don't already exist
-#   4. Skipping fabrics that are already configured
+#   This playbook manages fabric creation/update on NDFC using the
+#   cisco.dcnm.dcnm_fabric module with state=merged.
 #
 # Variables Required:
 #   - nd_fabrics: List of fabric definitions from host_vars/nexus_dashboard/fabric_definitions.yml
@@ -19,23 +16,31 @@
 #   - ansible_httpapi_validate_certs: Validate SSL certificates (typically false for lab)
 #   - ansible_httpapi_use_proxy: Use proxy for API calls (typically false)
 #
-# API Endpoints Used:
-#   - GET /api/v1/manage/fabrics: Retrieve existing fabrics
-#   - POST /api/v1/manage/fabrics: Create new fabrics
-#
-# Templates Used:
-#   - 02-configure-nd-fabric.j2: Jinja2 template that converts fabric variables to ND API JSON format
+# Module Used:
+#   - cisco.dcnm.dcnm_fabric: Create/update/query/delete NDFC fabrics
 #
 # Tags:
 #   - configure-fabrics: Run only fabric configuration tasks
 #
 # Example Usage:
-#   ansible-playbook ./playbooks/02-configure-nd-fabric.yml
-#   ansible-playbook ./playbooks/02-configure-nd-fabric.yml --tags configure-fabrics
+#   ansible-playbook ./playbooks/provision-fabric/1.0-configure-nd-fabric.yml
+#   ansible-playbook ./playbooks/provision-fabric/1.0-configure-nd-fabric.yml --tags configure-fabrics
 
 - name: Deploy Fabric Configuration to Nexus Dashboard
   hosts: nexus_dashboard
   gather_facts: false
+
+  vars:
+    fabric_type_map:
+      classiclan: LAN_CLASSIC
+      bgp: BGP
+      ipfm: IPFM
+      isn: ISN
+      vxlanibgp: VXLAN_EVPN
+      vxlanevpn: VXLAN_EVPN
+      vxlan_evpn: VXLAN_EVPN
+      vxlanevpnmsd: VXLAN_EVPN_MSD
+      vxlan_evpn_msd: VXLAN_EVPN_MSD
 
   tags:
     - configure-fabrics
@@ -48,79 +53,39 @@
     - name: Verify NDFC connectivity
       ansible.builtin.import_tasks: ../common/ndfc-preflight-check.yml
 
-    # Task 1: Query ND for existing fabrics to prevent duplicate creation
-    - name: Get Currently Configured Fabrics
-      cisco.nd.nd_rest:
-        host: "{{ ansible_host }}"
-        username: "{{ ansible_user }}"
-        password: "{{ ansible_ssh_pass }}"
-        use_ssl: "{{ ansible_httpapi_use_ssl }}"
-        validate_certs: "{{ ansible_httpapi_validate_certs }}"
-        use_proxy: "{{ ansible_httpapi_use_proxy }}"
-        login_domain: "{{ ansible_httpapi_login_domain }}"
-        path: /api/v1/manage/fabrics
-        method: GET
-      register: existing_fabrics
-
-    # Task 2: Show which fabrics are already configured on ND
-    - name: Display Existing Fabrics
-      ansible.builtin.debug:
-        msg: |
-          Currently configured fabrics: {{ existing_fabrics.current.fabrics | map(attribute='name') | list | length }}
-          {% for fabric in existing_fabrics.current.fabrics | map(attribute='name') | list %}
-          - {{ fabric }}
-          {% endfor %}
-
-    # Task 3: Filter nd_fabrics to only include fabrics not already on ND
-    # This prevents errors from attempting to create duplicate fabrics
-    - name: Create List of Fabrics to Deploy
+    - name: Build normalized fabric config list for dcnm_fabric
       ansible.builtin.set_fact:
-        existing_fabric_names: "{{ existing_fabrics.current.fabrics | map(attribute='name') | list }}"
-        fabrics_to_deploy: "{{ nd_fabrics | rejectattr('FABRIC_NAME', 'in', existing_fabrics.current.fabrics | map(attribute='name') | list) | list }}"
-
-    # Task 4: Show which fabrics will be created (empty list if all exist)
-    - name: Display Fabrics to Deploy
-      ansible.builtin.debug:
-        msg: |
-          Fabrics to be deployed: {{ fabrics_to_deploy | length }}
-          Already configured (skipped): {{ (nd_fabrics | length) - (fabrics_to_deploy | length) }}
-          {% for fabric in fabrics_to_deploy %}
-          - {{ fabric.FABRIC_NAME }}
-          {% endfor %}
-
-    # Task 5: Create new fabrics on ND using REST API
-    # Only runs for fabrics in fabrics_to_deploy list
-    # Uses Jinja2 template to transform fabric variables into ND API JSON format
-    - name: Configure Fabrics in Nexus Dashboard
-      cisco.nd.nd_rest:
-        host: "{{ ansible_host }}"
-        username: "{{ ansible_user }}"
-        password: "{{ ansible_ssh_pass }}"
-        use_ssl: "{{ ansible_httpapi_use_ssl }}"
-        validate_certs: "{{ ansible_httpapi_validate_certs }}"
-        use_proxy: "{{ ansible_httpapi_use_proxy }}"
-        login_domain: "{{ ansible_httpapi_login_domain }}"
-        path: /api/v1/manage/fabrics
-        method: POST
-        content: "{{ lookup('template', '../../templates/02-configure-nd-fabric.j2') }}"
-      loop: "{{ fabrics_to_deploy }}"
+        dcnm_fabrics_config: "{{ (dcnm_fabrics_config | default([])) + [ item | combine({'FABRIC_TYPE': (fabric_type_map[item.FABRIC_TYPE | default('LAN_CLASSIC') | lower] | default(item.FABRIC_TYPE | default('LAN_CLASSIC') | upper))}) ] }}"
+      loop: "{{ nd_fabrics | default([]) }}"
       loop_control:
         label: "{{ item.FABRIC_NAME }}"
+
+    - name: Display fabrics to be merged
+      ansible.builtin.debug:
+        msg: |
+          Fabrics to be merged: {{ dcnm_fabrics_config | default([]) | length }}
+          {% for fabric in dcnm_fabrics_config | default([]) %}
+          - {{ fabric.FABRIC_NAME }} ({{ fabric.FABRIC_TYPE }})
+          {% endfor %}
+
+    - name: Configure fabrics in Nexus Dashboard via dcnm_fabric
+      cisco.dcnm.dcnm_fabric:
+        state: merged
+        skip_validation: true
+        config: "{{ dcnm_fabrics_config }}"
+      vars:
+        ansible_network_os: cisco.dcnm.dcnm
       when:
-        - fabrics_to_deploy is defined
-        - fabrics_to_deploy | length > 0
+        - dcnm_fabrics_config is defined
+        - dcnm_fabrics_config | length > 0
       register: fabric_config_result
 
     - name: Display fabric configuration results
       ansible.builtin.debug:
         msg: |
           Fabric configuration complete.
-          Already existed (skipped): {{ (nd_fabrics | length) - (fabrics_to_deploy | default([]) | length) }}
-          {% for result in fabric_config_result.results | default([]) %}
-          {% if result.skipped is not defined or not result.skipped %}
-          - {{ result.item.FABRIC_NAME }}: {{ 'SUCCESS' if result.failed is not defined or not result.failed else 'FAILED' }}
-          {% endif %}
-          {% endfor %}
+          Changed: {{ fabric_config_result.changed | default(false) }}
+          Response entries: {{ fabric_config_result.response | default([]) | length }}
       when: fabric_config_result is defined
 
 #  TODO add a step that can do Update to an existing fabric using PUT
