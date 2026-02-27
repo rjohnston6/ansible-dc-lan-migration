@@ -21,13 +21,13 @@ Input Variables (item.*):
     - VRF_LITE_PROTOCOL:     VRF-Lite protocol - ebgp | static (default: ebgp)
     - LOCATION_LATITUDE:     Latitude for fabric location (default: 0)
     - LOCATION_LONGITUDE:    Longitude for fabric location (default: 0)
-    - PM_ENABLE:             Performance monitoring (default: false)
-    - IS_READ_ONLY:          Monitor-only / read-only mode (default: false)
-    - ENABLE_NXAPI:          Enable NX-API on switches (default: false)
 
 Notes:
   - management.type is always "classicLanEnhanced" for FABRIC_TYPE: enhancedLan
   - telemetryStreamingProtocol is left empty (ND default for enhanced LAN)
+  - The management block ONLY accepts bgpAsn/type/vrfLiteProtocol for this
+    fabric type - fields like monitoredMode/performanceMonitoring/nxapi are
+    NOT valid and will cause a 400 Bad Request error
 ================================================================================
 #}
 {
@@ -44,9 +44,6 @@ Notes:
   "management": {
     "bgpAsn": "{{ item.BGP_AS | default('65000') }}",
     "type": "classicLanEnhanced",
-    "vrfLiteProtocol": "{{ item.VRF_LITE_PROTOCOL | default('ebgp') }}",
-    "monitoredMode": {{ item.IS_READ_ONLY | default(false) | lower }},
-    "performanceMonitoring": {{ item.PM_ENABLE | default(false) | lower }},
-    "nxapi": {{ item.ENABLE_NXAPI | default(false) | lower }}
+    "vrfLiteProtocol": "{{ item.VRF_LITE_PROTOCOL | default('ebgp') }}"
   }
 }
