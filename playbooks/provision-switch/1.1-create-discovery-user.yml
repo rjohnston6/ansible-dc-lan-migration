@@ -17,9 +17,11 @@
 #   - vault_discovery_username: Username for NDFC switch discovery
 #   - vault_discovery_password: Password for NDFC switch discovery
 #
+# Module Used:
+#   - cisco.dcnm.dcnm_rest (httpapi connection - uses nd group credentials)
+#
 # API Endpoints Used:
-#   - GET /appcenter/cisco/ndfc/api/v1/lan-fabric/rest/control/policies/switches/<serial>
-#   - POST /appcenter/cisco/ndfc/api/v1/lan-fabric/rest/control/policies/bulk-create
+#   - POST /appcenter/cisco/ndfc/api/v1/lan-discovery/setCredential
 #
 # Templates Used:
 #   - 1.1-create-discovery-user.j2: Jinja2 template for switch_user policy JSON payload
@@ -101,170 +103,74 @@
           {%- endfor -%}
           {{ lookup }}
 
-    - name: Display switches to provision discovery user
-      ansible.builtin.debug:
-        msg: |
-          ═══════════════════════════════════════════════════════════════════════
-          DISCOVERY USER PROVISIONING
-          ═══════════════════════════════════════════════════════════════════════
-          Switches to provision: {{ switches_to_provision | length }}
-          Discovery username: {{ discovery_username }}
-          {% for switch in switches_to_provision %}
-          {%- set sn = switch.destination_switch_sn | default('') -%}
-          {%- if not sn and switch.ansible_host in switch_details_lookup -%}
-            {%- set sn = switch_details_lookup[switch.ansible_host].license_hostid | default('') -%}
-          {%- endif %}
-          - {{ switch.inventory_hostname }} ({{ sn if sn else 'NO SERIAL' }})
-          {% endfor %}
-          ═══════════════════════════════════════════════════════════════════════
-      when: switches_to_provision | length > 0
-
     - name: End play if no switches to provision
       ansible.builtin.meta: end_play
       when: switches_to_provision | length == 0
 
     # ========================================================================
-    # Phase 2: Build discovery user configurations
+    # Phase 2: Build setCredential payload data
     # ========================================================================
 
-    - name: Build discovery user configurations
+    - name: Build switch list for setCredential payload
       ansible.builtin.set_fact:
-        discovery_user_configs: |
-          {%- set configs = [] -%}
+        setcredential_switches: |
+          {%- set switches = [] -%}
           {%- for switch in switches_to_provision -%}
-            {%- set hostname = switch.inventory_hostname -%}
             {%- set ip = switch.ansible_host | default('') -%}
-            {%- set serial = switch.destination_switch_sn | default('') -%}
-            {%- if not serial and ip in switch_details_lookup -%}
-              {%- set serial = switch_details_lookup[ip].license_hostid | default('') -%}
-            {%- endif -%}
-            {%- if serial -%}
-              {%- set config = {
-                'hostname': hostname,
-                'serial_number': serial
-              } -%}
-              {%- set _ = configs.append(config) -%}
-            {%- endif -%}
+            {%- set details = switch_details_lookup.get(ip, {}) if switch_details_lookup is defined else {} -%}
+            {%- set sw = {
+              'ipAddress': ip,
+              'model': details.model | default(''),
+              'serialNumber': details.license_hostid | default(''),
+              'sysName': switch.inventory_hostname
+            } -%}
+            {%- set _ = switches.append(sw) -%}
           {%- endfor -%}
-          {{ configs }}
+          {{ switches }}
+        seed_ips: "{{ switches_to_provision | map(attribute='ansible_host') | join(',') }}"
 
-    # ========================================================================
-    # Phase 3: Idempotency - Query existing switch_user policies
-    # ========================================================================
-
-    - name: Get unique serial numbers from discovery user configs
-      ansible.builtin.set_fact:
-        unique_serials: "{{ discovery_user_configs | map(attribute='serial_number') | unique | list }}"
-      when:
-        - discovery_user_configs is defined
-        - discovery_user_configs | length > 0
-
-    - name: Query existing policies for each switch
-      cisco.nd.nd_rest:
-        host: "{{ ansible_host }}"
-        username: "{{ ansible_user }}"
-        password: "{{ ansible_ssh_pass }}"
-        use_ssl: "{{ ansible_httpapi_use_ssl }}"
-        validate_certs: "{{ ansible_httpapi_validate_certs }}"
-        use_proxy: "{{ ansible_httpapi_use_proxy }}"
-        login_domain: "{{ ansible_httpapi_login_domain }}"
-        path: "/appcenter/cisco/ndfc/api/v1/lan-fabric/rest/control/policies/switches/{{ item }}"
-        method: GET
-      loop: "{{ unique_serials | default([]) }}"
-      loop_control:
-        label: "{{ item }}"
-      when:
-        - unique_serials is defined
-        - unique_serials | length > 0
-      register: existing_policies_query
-      ignore_errors: true
-
-    - name: Build set of switches with existing discovery user policy
-      ansible.builtin.set_fact:
-        existing_switch_user_serials: |
-          {%- set serials_with_policy = [] -%}
-          {%- for result in existing_policies_query.results | default([]) -%}
-            {%- if result.current is defined and result.current is iterable -%}
-              {%- set serial = result.item -%}
-              {%- for policy in result.current -%}
-                {%- if policy.templateName is defined and policy.templateName == 'switch_user' -%}
-                  {%- set policy_username = policy.nvPairs.USERNAME | default('') -%}
-                  {%- if policy_username == discovery_username -%}
-                    {%- set _ = serials_with_policy.append(serial) -%}
-                  {%- endif -%}
-                {%- endif -%}
-              {%- endfor -%}
-            {%- endif -%}
-          {%- endfor -%}
-          {{ serials_with_policy | unique | list }}
-      when: existing_policies_query is defined
-
-    - name: Filter out switches that already have discovery user configured
-      ansible.builtin.set_fact:
-        discovery_user_configs_filtered: |
-          {%- set filtered = [] -%}
-          {%- for config in discovery_user_configs -%}
-            {%- if config.serial_number not in existing_switch_user_serials -%}
-              {%- set _ = filtered.append(config) -%}
-            {%- endif -%}
-          {%- endfor -%}
-          {{ filtered }}
-      when:
-        - discovery_user_configs is defined
-        - existing_switch_user_serials is defined
-
-    - name: Display discovery user configurations to apply (after filtering existing)
+    - name: Display switches to set discovery credentials for
       ansible.builtin.debug:
         msg: |
-          Discovery users to configure (excluding existing): {{ discovery_user_configs_filtered | length }}
-          Already configured (skipped): {{ (discovery_user_configs | length) - (discovery_user_configs_filtered | length) }}
-          {% for config in discovery_user_configs_filtered %}
-          - {{ config.hostname }} ({{ config.serial_number }})
+          ═══════════════════════════════════════════════════════════════════════
+          DISCOVERY CREDENTIAL PROVISIONING (setCredential)
+          ═══════════════════════════════════════════════════════════════════════
+          Switches: {{ setcredential_switches | length }}
+          Seed IPs: {{ seed_ips }}
+          Discovery username: {{ discovery_username }}
+          {% for sw in setcredential_switches %}
+          - {{ sw.sysName }} ({{ sw.ipAddress }}) SN={{ sw.serialNumber }} model={{ sw.model }}
           {% endfor %}
-      when: discovery_user_configs_filtered is defined
+          ═══════════════════════════════════════════════════════════════════════
 
     # ========================================================================
-    # Phase 4: Configure discovery user via NDFC API
+    # Phase 3: Set discovery credentials via NDFC setCredential API
     # ========================================================================
 
-    - name: Configure discovery user on switches
-      cisco.nd.nd_rest:
-        host: "{{ ansible_host }}"
-        username: "{{ ansible_user }}"
-        password: "{{ ansible_ssh_pass }}"
-        use_ssl: "{{ ansible_httpapi_use_ssl }}"
-        validate_certs: "{{ ansible_httpapi_validate_certs }}"
-        use_proxy: "{{ ansible_httpapi_use_proxy }}"
-        login_domain: "{{ ansible_httpapi_login_domain }}"
-        path: "/appcenter/cisco/ndfc/api/v1/lan-fabric/rest/control/policies/bulk-create"
+    - name: Set discovery credentials for switches
+      cisco.dcnm.dcnm_rest:
+        path: "/appcenter/cisco/ndfc/api/v1/lan-discovery/setCredential"
         method: POST
-        content: "{{ lookup('template', '../../templates/1.1-create-discovery-user.j2') }}"
-      loop: "{{ discovery_user_configs_filtered }}"
-      loop_control:
-        label: "{{ item.hostname }} ({{ item.serial_number }})"
+        json_data: "{{ _payload | to_json if _payload is mapping else _payload }}"
       vars:
-        serial_number: "{{ item.serial_number }}"
-      when:
-        - discovery_user_configs_filtered is defined
-        - discovery_user_configs_filtered | length > 0
-      register: discovery_user_results
+        ansible_network_os: cisco.dcnm.dcnm
+        _payload: "{{ lookup('template', '../../templates/1.1-create-discovery-user.j2') }}"
+      register: setcredential_result
 
     # ========================================================================
-    # Phase 5: Display results
+    # Phase 4: Display results
     # ========================================================================
 
-    - name: Display discovery user configuration results
+    - name: Display setCredential results
       ansible.builtin.debug:
         msg: |
           ═══════════════════════════════════════════════════════════════════════
-          DISCOVERY USER CONFIGURATION RESULTS
+          DISCOVERY CREDENTIAL RESULTS
           ═══════════════════════════════════════════════════════════════════════
-          Already existed (skipped): {{ (discovery_user_configs | length) - (discovery_user_configs_filtered | default([]) | length) }}
-          Newly configured: {{ discovery_user_configs_filtered | default([]) | length }}
-          {% for result in discovery_user_results.results | default([]) %}
-          {% if result.skipped is not defined or not result.skipped %}
-          {{ '✓' if (result.failed is not defined or not result.failed) else '✗' }} {{ result.item.hostname }} ({{ result.item.serial_number }}): {{ 'SUCCESS' if (result.failed is not defined or not result.failed) else 'FAILED' }}
-          {% endif %}
+          Status: {{ 'SUCCESS' if (setcredential_result.failed is not defined or not setcredential_result.failed) else 'FAILED' }}
+          Switches configured: {{ setcredential_switches | length }}
+          {% for sw in setcredential_switches %}
+          - {{ sw.sysName }} ({{ sw.ipAddress }})
           {% endfor %}
           ═══════════════════════════════════════════════════════════════════════
-      when: discovery_user_results is defined
+      when: setcredential_result is defined
