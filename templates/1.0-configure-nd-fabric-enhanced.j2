@@ -1,0 +1,52 @@
+{#
+================================================================================
+Template: 1.0-configure-nd-fabric-enhanced.j2
+================================================================================
+Purpose:
+  Generate JSON payload for creating/updating an Enhanced LAN fabric via the
+  Nexus Dashboard Fabric REST API.
+
+API Endpoint:
+  POST /api/v1/manage/fabrics          (create)
+  PUT  /api/v1/manage/fabrics/{name}   (update)
+
+Input Variables (item.*):
+  Required:
+    - FABRIC_NAME:           Name of the fabric
+
+  Optional (with defaults):
+    - LICENSE_TIER:          License level (default: essentials)
+    - SECURITY_DOMAIN:       Security domain (default: all)
+    - BGP_AS:                BGP ASN for management plane (default: 65000)
+    - VRF_LITE_PROTOCOL:     VRF-Lite protocol - ebgp | static (default: ebgp)
+    - LOCATION_LATITUDE:     Latitude for fabric location (default: 0)
+    - LOCATION_LONGITUDE:    Longitude for fabric location (default: 0)
+    - PM_ENABLE:             Performance monitoring (default: false)
+    - IS_READ_ONLY:          Monitor-only / read-only mode (default: false)
+    - ENABLE_NXAPI:          Enable NX-API on switches (default: false)
+
+Notes:
+  - management.type is always "classicLanEnhanced" for FABRIC_TYPE: enhancedLan
+  - telemetryStreamingProtocol is left empty (ND default for enhanced LAN)
+================================================================================
+#}
+{
+  "name": "{{ item.FABRIC_NAME }}",
+  "licenseTier": "{{ item.LICENSE_TIER | default('essentials') }}",
+  "securityDomain": "{{ item.SECURITY_DOMAIN | default('all') }}",
+  "telemetryCollectionType": "outOfBand",
+  "telemetryStreamingProtocol": "",
+  "location": {
+    "latitude": {{ item.LOCATION_LATITUDE | default(0) }},
+    "longitude": {{ item.LOCATION_LONGITUDE | default(0) }}
+  },
+  "category": "fabric",
+  "management": {
+    "bgpAsn": "{{ item.BGP_AS | default('65000') }}",
+    "type": "classicLanEnhanced",
+    "vrfLiteProtocol": "{{ item.VRF_LITE_PROTOCOL | default('ebgp') }}",
+    "monitoredMode": {{ item.IS_READ_ONLY | default(false) | lower }},
+    "performanceMonitoring": {{ item.PM_ENABLE | default(false) | lower }},
+    "nxapi": {{ item.ENABLE_NXAPI | default(false) | lower }}
+  }
+}
