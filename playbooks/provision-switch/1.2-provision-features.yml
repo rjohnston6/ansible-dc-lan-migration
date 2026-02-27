@@ -183,6 +183,8 @@
                 {%- if feature in feature_lookup -%}
                   {%- set policy = {
                     'hostname': hostname,
+                    'ip': ip,
+                    'fabric': switch.fabric,
                     'serial_number': serial,
                     'feature': feature,
                     'template_name': feature_lookup[feature]
@@ -195,128 +197,87 @@
           {{ policies }}
       when: switches_to_provision | length > 0
 
-    # Query existing policies per switch to make playbook idempotent
-    - name: Get unique serial numbers from feature policies
-      ansible.builtin.set_fact:
-        unique_serials: "{{ feature_policies | map(attribute='serial_number') | unique | list }}"
-      when:
-        - feature_policies is defined
-        - feature_policies | length > 0
+    # ========================================================================
+    # Phase 3: Build dcnm_policy configs grouped by fabric
+    # ========================================================================
 
-    - name: Query existing policies for each switch
-      cisco.nd.nd_rest:
-        host: "{{ ansible_host }}"
-        username: "{{ ansible_user }}"
-        password: "{{ ansible_ssh_pass }}"
-        use_ssl: "{{ ansible_httpapi_use_ssl }}"
-        validate_certs: "{{ ansible_httpapi_validate_certs }}"
-        use_proxy: "{{ ansible_httpapi_use_proxy }}"
-        login_domain: "{{ ansible_httpapi_login_domain }}"
-        path: "/appcenter/cisco/ndfc/api/v1/lan-fabric/rest/control/policies/switches/{{ item }}"
-        method: GET
-      loop: "{{ unique_serials | default([]) }}"
-      loop_control:
-        label: "{{ item }}"
-      when:
-        - unique_serials is defined
-        - unique_serials | length > 0
-      register: existing_policies_query
-      ignore_errors: true
-
-    - name: Build set of existing policy template names per serial
+    - name: Build feature policy configs grouped by fabric for dcnm_policy
       ansible.builtin.set_fact:
-        existing_policies_lookup: |
-          {%- set lookup = {} -%}
-          {%- for result in existing_policies_query.results | default([]) -%}
-            {%- if result.current is defined and result.current is iterable -%}
-              {%- set serial = result.item -%}
-              {%- set keys = [] -%}
-              {%- for policy in result.current -%}
-                {%- if policy.templateName is defined -%}
-                  {%- if policy.templateName == 'switch_freeform' and policy.description | default('') != '' -%}
-                    {%- set _ = keys.append('switch_freeform:' + policy.description) -%}
-                  {%- else -%}
-                    {%- set _ = keys.append(policy.templateName) -%}
-                  {%- endif -%}
-                {%- endif -%}
-              {%- endfor -%}
-              {%- set _ = lookup.update({serial: keys}) -%}
-            {%- endif -%}
-          {%- endfor -%}
-          {{ lookup }}
-      when: existing_policies_query is defined
-
-    - name: Filter out already configured feature policies
-      ansible.builtin.set_fact:
-        feature_policies_filtered: |
-          {%- set filtered = [] -%}
+        policy_by_fabric: |
+          {%- set by_fabric = {} -%}
           {%- for policy in feature_policies -%}
-            {%- set serial = policy.serial_number -%}
-            {%- set existing = existing_policies_lookup.get(serial, []) -%}
-            {%- if policy.template_name == 'switch_freeform' -%}
-              {%- set key = 'switch_freeform:feature_' + policy.feature -%}
-              {%- if key not in existing -%}
-                {%- set _ = filtered.append(policy) -%}
-              {%- endif -%}
-            {%- elif policy.template_name not in existing -%}
-              {%- set _ = filtered.append(policy) -%}
+            {%- set fabric = policy.fabric -%}
+            {%- if fabric not in by_fabric -%}
+              {%- set _ = by_fabric.update({fabric: {}}) -%}
             {%- endif -%}
+            {%- set ip = policy.ip -%}
+            {%- if ip not in by_fabric[fabric] -%}
+              {%- set _ = by_fabric[fabric].update({ip: []}) -%}
+            {%- endif -%}
+            {%- set _ = by_fabric[fabric][ip].append({'name': policy.template_name, 'create_additional_policy': false}) -%}
           {%- endfor -%}
-          {{ filtered }}
-      when:
-        - feature_policies is defined
-        - existing_policies_lookup is defined
+          {%- set result = {} -%}
+          {%- for fabric, switches in by_fabric.items() -%}
+            {%- set config = [{'switch': []}] -%}
+            {%- for ip, policies in switches.items() -%}
+              {%- set _ = config[0].switch.append({'ip': ip, 'policies': policies}) -%}
+            {%- endfor -%}
+            {%- set _ = result.update({fabric: config}) -%}
+          {%- endfor -%}
+          {{ result }}
+      when: feature_policies is defined and feature_policies | length > 0
 
-    - name: Display feature policies to configure (after filtering existing)
+    - name: Display feature policies to configure
       ansible.builtin.debug:
         msg: |
-          Feature policies to configure (excluding existing): {{ feature_policies_filtered | length }}
-          Already configured (skipped): {{ (feature_policies | length) - (feature_policies_filtered | length) }}
-          {% set filtered_keys = feature_policies_filtered | map(attribute='hostname') | zip(feature_policies_filtered | map(attribute='feature')) | map('join', ':') | list %}
-          {% for policy in feature_policies %}
-          {% if (policy.hostname + ':' + policy.feature) not in filtered_keys %}
-            (skipped) {{ policy.hostname }}: {{ policy.feature }}
-          {% endif %}
-          {% endfor %}
-          To configure:
-          {% for policy in feature_policies_filtered %}
-          - {{ policy.hostname }}: {{ policy.feature }} -> {{ policy.template_name }}
-          {% endfor %}
-      when: feature_policies_filtered is defined
+          ═══════════════════════════════════════════════════════════════════════
+          FEATURE POLICY PROVISIONING
+          ═══════════════════════════════════════════════════════════════════════
+          Total policies: {{ feature_policies | length }}
+          {% for fabric, config in policy_by_fabric.items() %}
+          Fabric: {{ fabric }}
+          {% for sw in config[0].switch %}
+            - {{ sw.ip }}: {% for p in sw.policies %}{{ p.name }}{% if not loop.last %}, {% endif %}{% endfor %}
 
-    # Configure feature policies via NDFC API
+          {% endfor %}
+          {% endfor %}
+          ═══════════════════════════════════════════════════════════════════════
+      when: policy_by_fabric is defined
+
+    # ========================================================================
+    # Phase 4: Configure feature policies via dcnm_policy
+    # ========================================================================
+
     - name: Configure feature policies on switches
-      cisco.nd.nd_rest:
-        host: "{{ ansible_host }}"
-        username: "{{ ansible_user }}"
-        password: "{{ ansible_ssh_pass }}"
-        use_ssl: "{{ ansible_httpapi_use_ssl }}"
-        validate_certs: "{{ ansible_httpapi_validate_certs }}"
-        use_proxy: "{{ ansible_httpapi_use_proxy }}"
-        login_domain: "{{ ansible_httpapi_login_domain }}"
-        path: "/appcenter/cisco/ndfc/api/v1/lan-fabric/rest/control/policies/bulk-create"
-        method: POST
-        content: "{{ lookup('template', '../../templates/1.2-provision-features.j2') }}"
-      loop: "{{ feature_policies_filtered }}"
-      loop_control:
-        label: "{{ item.hostname }}: {{ item.feature }}"
+      cisco.dcnm.dcnm_policy:
+        fabric: "{{ item.key }}"
+        state: merged
+        deploy: false
+        config: "{{ item.value }}"
       vars:
-        serial_number: "{{ item.serial_number }}"
-        template_name: "{{ item.template_name }}"
-        feature: "{{ item.feature }}"
+        ansible_network_os: cisco.dcnm.dcnm
+      loop: "{{ policy_by_fabric | default({}) | dict2items }}"
+      loop_control:
+        label: "{{ item.key }} ({{ item.value | length }} policy types)"
       when:
-        - feature_policies_filtered is defined
-        - feature_policies_filtered | length > 0
+        - policy_by_fabric is defined
+        - policy_by_fabric | length > 0
       register: feature_policy_results
+
+    # ========================================================================
+    # Phase 5: Display results
+    # ========================================================================
 
     - name: Display feature policy configuration results
       ansible.builtin.debug:
         msg: |
-          Feature policy configuration complete.
-          Already existed (skipped): {{ (feature_policies | length) - (feature_policies_filtered | default([]) | length) }}
+          ═══════════════════════════════════════════════════════════════════════
+          FEATURE POLICY RESULTS
+          ═══════════════════════════════════════════════════════════════════════
           {% for result in feature_policy_results.results | default([]) %}
           {% if result.skipped is not defined or not result.skipped %}
-          - {{ result.item.hostname }}/{{ result.item.feature }}: {{ 'SUCCESS' if result.failed is not defined or not result.failed else 'FAILED' }}
+          {{ result.item.key }}: {{ 'SUCCESS' if (result.failed is not defined or not result.failed) else 'FAILED' }}
           {% endif %}
           {% endfor %}
+          ═══════════════════════════════════════════════════════════════════════
       when: feature_policy_results is defined
