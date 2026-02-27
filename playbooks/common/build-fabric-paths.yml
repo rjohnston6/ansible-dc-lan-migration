@@ -1,0 +1,21 @@
+---
+#==============================================================================
+# Shared Task: Build Fabric Paths from Fabric Definitions
+#==============================================================================
+# Purpose: Construct absolute fabric directory paths from nd_fabrics.
+#          Import this in provisioning playbooks that need to load
+#          generated files from fabrics/<fabric-name>/.
+#
+# Usage:
+#   tasks:
+#     - name: Build fabric paths from nd_fabrics
+#       ansible.builtin.import_tasks: ../common/build-fabric-paths.yml
+#
+# Optional Variables:
+#   - fabric_paths_base_dir: Override default base path
+#     (default: {{ playbook_dir }}/../../fabrics)
+#==============================================================================
+
+- name: Build fabric paths from nd_fabrics
+  ansible.builtin.set_fact:
+    fabric_paths: "{{ nd_fabrics | map(attribute='FABRIC_NAME') | map('regex_replace', '^(.*)$', (fabric_paths_base_dir | default(playbook_dir ~ '/../../fabrics')) ~ '/\\1') | list }}"

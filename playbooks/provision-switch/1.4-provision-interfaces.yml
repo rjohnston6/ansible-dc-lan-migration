@@ -85,8 +85,7 @@
 
     # Build fabric paths from nd_fabrics for targeted file searches
     - name: Build fabric paths from nd_fabrics
-      ansible.builtin.set_fact:
-        fabric_paths: "{{ nd_fabrics | map(attribute='FABRIC_NAME') | map('regex_replace', '^(.*)$', playbook_dir ~ '/../../fabrics/\\1') | list }}"
+      ansible.builtin.import_tasks: ../common/build-fabric-paths.yml
       when: switches_to_provision | length > 0
 
     #--------------------------------------------------------------------------
@@ -316,6 +315,10 @@
             | list
           }}
 
+    - name: Build fabric paths from nd_fabrics
+      ansible.builtin.import_tasks: ../common/build-fabric-paths.yml
+      when: switches_to_provision | length > 0
+
     #--------------------------------------------------------------------------
     # Load VPC interface inventory from fabric directories
     #--------------------------------------------------------------------------
@@ -360,6 +363,28 @@
         fabrics_to_process: "{{ switches_to_provision | map(attribute='fabric') | unique | list }}"
       when: switches_to_provision | length > 0
 
+    - name: Count VPC interfaces in target fabrics
+      ansible.builtin.set_fact:
+        vpc_interfaces_count: >-
+          {%- set count = 0 -%}
+          {%- for fabric_name in fabrics_to_process | default([]) -%}
+            {%- set entries = vpc_interfaces_by_fabric.get(fabric_name) | default([], true) -%}
+            {%- set count = count + (entries | length) -%}
+          {%- endfor -%}
+          {{ count }}
+      when:
+        - switches_to_provision | length > 0
+        - vpc_interfaces_by_fabric is defined
+        - fabrics_to_process is defined
+
+    - name: Skip VPC deployment when no VPC interfaces are profiled
+      ansible.builtin.debug:
+        msg: "No VPC interfaces found in profiled data for target fabrics. Skipping VPC configuration tasks."
+      when:
+        - switches_to_provision | length > 0
+        - vpc_interfaces_count is defined
+        - vpc_interfaces_count | int == 0
+
     #--------------------------------------------------------------------------
     # Build VPC interface configuration from template
     #--------------------------------------------------------------------------
@@ -370,6 +395,8 @@
         - switches_to_provision | length > 0
         - vpc_interfaces_by_fabric is defined
         - fabrics_to_process is defined
+        - vpc_interfaces_count is defined
+        - vpc_interfaces_count | int > 0
 
     - name: Display VPC interfaces to configure
       ansible.builtin.debug:
