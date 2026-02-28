@@ -1,0 +1,238 @@
+---
+#==============================================================================
+# Playbook: 1.6-provision-vrf.yml
+#==============================================================================
+# Purpose: Configure VRF definitions on switches via Nexus Dashboard (NDFC)
+#          using the cisco.dcnm.dcnm_vrf module.
+#
+# Description:
+#   Reads profiled VRF data from fabrics/<fabric>/vrf_database.yml for all
+#   target fabrics. Consolidates VRFs per fabric (same VRF on multiple
+#   switches -> single config entry with multiple attach entries) and applies
+#   them via dcnm_vrf state: merged.
+#
+#   Skips built-in VRFs ("default", "management") that are always present
+#   on NX-OS and are not created via NDFC policies.
+#
+#   Idempotency: state: merged creates VRFs that do not exist and updates
+#   those whose properties differ. VRFs not specified here are left untouched.
+#
+# Prerequisites:
+#   - Switches onboarded to NDFC (run 1.0-provision-switches.yml)
+#   - VRF data profiled (run 1.0-profile-existing-switches.yml
+#     with --tags profile-vrfs to generate vrf_database.yml files)
+#
+# Modules Used:
+#   - cisco.dcnm.dcnm_vrf: fabric-scoped VRF management via NDFC
+#
+# Variables Required (per switch in inventory/hosts.yml):
+#   - add_to_fabric: true     include switch in provisioning
+#   - fabric                  target fabric name (must match nd_fabrics[])
+#
+# Variables from vrf_database.yml:
+#   - switches.<hostname>.vrfs: list of VRFs with name/description/rd/vni
+#
+# Tags:
+#   - deploy-vrf: Run only VRF provisioning tasks
+#
+# Usage Examples:
+#   ansible-playbook ./playbooks/provision-switch/1.6-provision-vrf.yml
+#   ansible-playbook ./playbooks/provision-switch/1.6-provision-vrf.yml --tags deploy-vrf
+#==============================================================================
+
+- name: Configure VRF Definitions on Switches via NDFC
+  hosts: nexus_dashboard
+  gather_facts: false
+
+  tags:
+    - deploy-vrf
+
+  tasks:
+
+    #--------------------------------------------------------------------------
+    # Pre-flight: Verify NDFC is reachable before any provisioning
+    #--------------------------------------------------------------------------
+    - name: Verify NDFC connectivity
+      ansible.builtin.import_tasks: ../common/ndfc-preflight-check.yml
+
+    #--------------------------------------------------------------------------
+    # Build list of switches to provision
+    #--------------------------------------------------------------------------
+    - name: Build list of switches to provision
+      ansible.builtin.set_fact:
+        switches_to_provision: >-
+          {{
+            groups['switches'] | default([])
+            | map('extract', hostvars)
+            | selectattr('add_to_fabric', 'defined')
+            | selectattr('add_to_fabric', 'equalto', true)
+            | list
+          }}
+
+    - name: Display switches to provision
+      ansible.builtin.debug:
+        msg: "Switches to provision: {{ switches_to_provision | map(attribute='inventory_hostname') | list }}"
+      when: switches_to_provision | length > 0
+
+    #--------------------------------------------------------------------------
+    # Build fabric paths for targeted file discovery
+    #--------------------------------------------------------------------------
+    - name: Build fabric paths from nd_fabrics
+      ansible.builtin.import_tasks: ../common/build-fabric-paths.yml
+      when: switches_to_provision | length > 0
+
+    #--------------------------------------------------------------------------
+    # Load VRF data from profiled fabric files
+    #--------------------------------------------------------------------------
+    - name: Find all vrf_database.yml files
+      ansible.builtin.find:
+        paths: "{{ fabric_paths }}"
+        patterns: "vrf_database.yml"
+      register: vrf_database_files
+      when: switches_to_provision | length > 0
+
+    - name: Load VRF data from all fabrics
+      ansible.builtin.include_vars:
+        file: "{{ item.path }}"
+        name: "vrf_data_{{ item.path | dirname | basename }}"
+      loop: "{{ vrf_database_files.files | default([]) }}"
+      loop_control:
+        label: "{{ item.path | dirname | basename }}"
+      when: switches_to_provision | length > 0
+
+    - name: Build consolidated VRF lookup (keyed by hostname)
+      ansible.builtin.set_fact:
+        vrf_lookup: |
+          {%- set lookup = {} -%}
+          {%- for file in vrf_database_files.files | default([]) -%}
+            {%- set fabric_name = file.path | dirname | basename -%}
+            {%- set var_name = 'vrf_data_' + fabric_name -%}
+            {%- if hostvars[inventory_hostname][var_name] is defined -%}
+              {%- set fabric_data = hostvars[inventory_hostname][var_name] -%}
+              {%- if fabric_data.switches is defined -%}
+                {%- for hostname, data in fabric_data.switches.items() -%}
+                  {%- set _ = lookup.update({hostname: data | combine({'fabric': fabric_name})}) -%}
+                {%- endfor -%}
+              {%- endif -%}
+            {%- endif -%}
+          {%- endfor -%}
+          {{ lookup }}
+      when: switches_to_provision | length > 0
+
+    #--------------------------------------------------------------------------
+    # Build per-fabric VRF config for dcnm_vrf
+    #
+    # dcnm_vrf is fabric-scoped: one call per fabric with all VRFs and their
+    # attached switch IPs consolidated. Same VRF on N switches -> one VRF
+    # config entry with N ip_address entries under attach:
+    #--------------------------------------------------------------------------
+    - name: Build per-fabric VRF config for dcnm_vrf
+      ansible.builtin.set_fact:
+        vrf_config_by_fabric: |
+          {%- set skip_vrfs = ['default', 'management'] -%}
+          {%- set by_fabric = {} -%}
+          {%- for switch in switches_to_provision -%}
+            {%- set hostname = switch.inventory_hostname -%}
+            {%- set switch_ip = switch.ansible_host -%}
+            {%- set fabric_name = switch.fabric | default('') -%}
+            {%- if hostname in vrf_lookup -%}
+              {%- if fabric_name not in by_fabric -%}
+                {%- set _ = by_fabric.update({fabric_name: {}}) -%}
+              {%- endif -%}
+              {%- set switch_vrf_data = vrf_lookup[hostname] -%}
+              {%- for vrf in switch_vrf_data.vrfs | default([], true) -%}
+                {%- if vrf.name | lower not in skip_vrfs -%}
+                  {%- set vrf_key = vrf.name -%}
+                  {%- if vrf_key not in by_fabric[fabric_name] -%}
+                    {%- set vrf_entry = {
+                      'vrf_name': vrf.name,
+                      'vrf_template': 'Default_VRF_Universal',
+                      'vrf_extension_template': 'Default_VRF_Extension_Universal',
+                      'deploy': true,
+                      'attach': []
+                    } -%}
+                    {%- if vrf.description is defined and vrf.description -%}
+                      {%- set _ = vrf_entry.update({'vrf_description': vrf.description}) -%}
+                    {%- endif -%}
+                    {%- if vrf.vni is defined and vrf.vni -%}
+                      {%- set _ = vrf_entry.update({'vrf_id': vrf.vni | int}) -%}
+                    {%- endif -%}
+                    {%- set _ = by_fabric[fabric_name].update({vrf_key: vrf_entry}) -%}
+                  {%- endif -%}
+                  {%- set _ = by_fabric[fabric_name][vrf_key]['attach'].append({'ip_address': switch_ip}) -%}
+                {%- endif -%}
+              {%- endfor -%}
+            {%- endif -%}
+          {%- endfor -%}
+          {%- set result = {} -%}
+          {%- for fabric_name, vrfs in by_fabric.items() -%}
+            {%- set _ = result.update({fabric_name: vrfs.values() | list}) -%}
+          {%- endfor -%}
+          {{ result }}
+      when:
+        - switches_to_provision | length > 0
+        - vrf_lookup is defined
+
+    #--------------------------------------------------------------------------
+    # Get list of fabrics that have VRFs to provision
+    #--------------------------------------------------------------------------
+    - name: Get fabrics with VRFs to provision
+      ansible.builtin.set_fact:
+        fabrics_with_vrfs: >-
+          {{
+            vrf_config_by_fabric | dict2items
+            | selectattr('value', 'defined')
+            | selectattr('value', 'ne', [])
+            | map(attribute='key') | list
+          }}
+      when: vrf_config_by_fabric is defined
+
+    #--------------------------------------------------------------------------
+    # Display deployment plan
+    #--------------------------------------------------------------------------
+    - name: Display VRF deployment plan
+      ansible.builtin.debug:
+        msg: |
+          VRF provisioning plan for fabric: {{ item }}
+          VRFs to configure (state: merged):
+          {% for vrf in vrf_config_by_fabric[item] %}
+            - {{ vrf.vrf_name }}{% if vrf.vrf_description is defined %} ({{ vrf.vrf_description }}){% endif %}
+
+              attach: {{ vrf.attach | map(attribute='ip_address') | list | join(', ') }}
+          {% endfor %}
+      loop: "{{ fabrics_with_vrfs | default([]) }}"
+      when: fabrics_with_vrfs is defined and fabrics_with_vrfs | length > 0
+
+    - name: Skip notification when no VRFs to configure
+      ansible.builtin.debug:
+        msg: "No VRF data found in profiled fabric files. Nothing to provision."
+      when: >
+        vrf_config_by_fabric is not defined or
+        (fabrics_with_vrfs is defined and fabrics_with_vrfs | length == 0)
+
+    #--------------------------------------------------------------------------
+    # Deploy VRFs via dcnm_vrf (one call per fabric, idempotent via merged)
+    #--------------------------------------------------------------------------
+    - name: Configure VRF definitions via dcnm_vrf
+      cisco.dcnm.dcnm_vrf:
+        fabric: "{{ item }}"
+        state: merged
+        config: "{{ vrf_config_by_fabric[item] }}"
+      loop: "{{ fabrics_with_vrfs | default([]) }}"
+      loop_control:
+        label: "{{ item }} ({{ vrf_config_by_fabric[item] | length }} VRF(s))"
+      when:
+        - fabrics_with_vrfs is defined
+        - fabrics_with_vrfs | length > 0
+      register: vrf_results
+
+    - name: Display VRF provisioning results
+      ansible.builtin.debug:
+        msg: |
+          VRF provisioning result for fabric: {{ item.item }}
+          - Changed: {{ item.changed }}
+          - Response: {{ item.response | default([]) | to_nice_yaml }}
+      loop: "{{ vrf_results.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item }}"
+      when: vrf_results is defined

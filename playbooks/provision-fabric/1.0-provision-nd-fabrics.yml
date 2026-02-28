@@ -1,0 +1,206 @@
+---
+# Playbook: 1.0-provision-nd-fabrics.yml
+# Purpose: Deploy fabric configurations to Nexus Dashboard Fabric Controller (NDFC)
+#
+# Description:
+#   This playbook manages fabric creation/update on NDFC. Fabric handling depends
+#   on the FABRIC_TYPE defined in fabric_definitions.yml:
+#
+#   enhancedLan  → REST API via cisco.nd.nd_rest
+#                  POST /api/v1/manage/fabrics         (create)
+#                  PUT  /api/v1/manage/fabrics/{name}  (update if exists)
+#                  Template: templates/1.0-configure-nd-fabric-enhanced.j2
+#
+#   All others   → cisco.dcnm.dcnm_fabric module with state=merged
+#                  (classicLan, vxlanIbgp, etc.)
+#
+# Variables Required:
+#   - nd_fabrics: List of fabric definitions from host_vars/nexus_dashboard/fabric_definitions.yml
+#                 Each fabric should contain FABRIC_NAME and configuration parameters
+#   - ansible_host: Nexus Dashboard IP address
+#   - ansible_user: ND username
+#   - ansible_ssh_pass: ND password
+#   - ansible_httpapi_use_ssl: Use SSL for API calls (typically true)
+#   - ansible_httpapi_validate_certs: Validate SSL certificates (typically false for lab)
+#   - ansible_httpapi_use_proxy: Use proxy for API calls (typically false)
+#
+# Enhanced LAN Extra Variables (optional, have defaults):
+#   - BGP_AS:              BGP ASN (default: 65000)
+#   - VRF_LITE_PROTOCOL:   ebgp | static (default: ebgp)
+#   - LICENSE_TIER:        essentials | advantage | premier (default: essentials)
+#   - SECURITY_DOMAIN:     ND security domain (default: all)
+#
+# Tags:
+#   - configure-fabrics: Run only fabric configuration tasks
+#
+# Example Usage:
+#   ansible-playbook ./playbooks/provision-fabric/1.0-provision-nd-fabrics.yml
+#   ansible-playbook ./playbooks/provision-fabric/1.0-provision-nd-fabrics.yml --tags configure-fabrics
+
+- name: Deploy Fabric Configuration to Nexus Dashboard
+  hosts: nexus_dashboard
+  gather_facts: false
+
+  vars:
+    fabric_type_map:
+      classiclan: LAN_CLASSIC
+      bgp: BGP
+      ipfm: IPFM
+      isn: ISN
+      vxlanibgp: VXLAN_EVPN
+      vxlanevpn: VXLAN_EVPN
+      vxlan_evpn: VXLAN_EVPN
+      vxlanevpnmsd: VXLAN_EVPN_MSD
+      vxlan_evpn_msd: VXLAN_EVPN_MSD
+
+  tags:
+    - configure-fabrics
+
+  tasks:
+
+    #--------------------------------------------------------------------------
+    # Pre-flight: Verify NDFC is reachable before any provisioning
+    #--------------------------------------------------------------------------
+    - name: Verify NDFC connectivity
+      ansible.builtin.import_tasks: ../common/ndfc-preflight-check.yml
+
+    #--------------------------------------------------------------------------
+    # Split fabrics: enhancedLan handled via REST API, all others via dcnm_fabric
+    #--------------------------------------------------------------------------
+    - name: Split fabrics by type
+      ansible.builtin.set_fact:
+        enhanced_fabrics: "{{ nd_fabrics | default([]) | selectattr('FABRIC_TYPE', 'equalto', 'enhancedLan') | list }}"
+        standard_fabrics: "{{ nd_fabrics | default([]) | rejectattr('FABRIC_TYPE', 'equalto', 'enhancedLan') | list }}"
+
+    - name: Display fabric split summary
+      ansible.builtin.debug:
+        msg: |
+          Total fabrics: {{ nd_fabrics | default([]) | length }}
+          Enhanced LAN (REST API): {{ enhanced_fabrics | length }}
+          {% for f in enhanced_fabrics %}- {{ f.FABRIC_NAME }}
+          {% endfor %}Standard (dcnm_fabric): {{ standard_fabrics | length }}
+          {% for f in standard_fabrics %}- {{ f.FABRIC_NAME }} ({{ f.FABRIC_TYPE }})
+          {% endfor %}
+
+    #--------------------------------------------------------------------------
+    # Enhanced LAN fabrics: create/update via REST API
+    #--------------------------------------------------------------------------
+    - name: Query all fabrics from Nexus Dashboard
+      cisco.nd.nd_rest:
+        host: "{{ ansible_host }}"
+        username: "{{ ansible_user }}"
+        password: "{{ ansible_ssh_pass }}"
+        use_ssl: "{{ ansible_httpapi_use_ssl }}"
+        validate_certs: "{{ ansible_httpapi_validate_certs }}"
+        use_proxy: "{{ ansible_httpapi_use_proxy }}"
+        login_domain: "{{ ansible_httpapi_login_domain }}"
+        path: "/api/v1/manage/fabrics"
+        method: GET
+      register: all_fabrics_query
+      when: enhanced_fabrics | length > 0
+
+    - name: Build set of existing enhanced fabric names
+      ansible.builtin.set_fact:
+        existing_enhanced_fabrics: >-
+          {{
+            all_fabrics_query.current.fabrics | default([])
+            | map(attribute='name')
+            | list
+          }}
+      when: enhanced_fabrics | length > 0
+
+    - name: Create new enhanced LAN fabrics (POST)
+      cisco.nd.nd_rest:
+        host: "{{ ansible_host }}"
+        username: "{{ ansible_user }}"
+        password: "{{ ansible_ssh_pass }}"
+        use_ssl: "{{ ansible_httpapi_use_ssl }}"
+        validate_certs: "{{ ansible_httpapi_validate_certs }}"
+        use_proxy: "{{ ansible_httpapi_use_proxy }}"
+        login_domain: "{{ ansible_httpapi_login_domain }}"
+        path: "/api/v1/manage/fabrics"
+        method: POST
+        content: "{{ lookup('template', '../../templates/1.0-configure-nd-fabric-enhanced.j2') }}"
+      loop: "{{ enhanced_fabrics }}"
+      loop_control:
+        label: "{{ item.FABRIC_NAME }}"
+      when:
+        - enhanced_fabrics | length > 0
+        - item.FABRIC_NAME not in (existing_enhanced_fabrics | default([]))
+      register: enhanced_create_result
+
+    - name: Update existing enhanced LAN fabrics (PUT)
+      cisco.nd.nd_rest:
+        host: "{{ ansible_host }}"
+        username: "{{ ansible_user }}"
+        password: "{{ ansible_ssh_pass }}"
+        use_ssl: "{{ ansible_httpapi_use_ssl }}"
+        validate_certs: "{{ ansible_httpapi_validate_certs }}"
+        use_proxy: "{{ ansible_httpapi_use_proxy }}"
+        login_domain: "{{ ansible_httpapi_login_domain }}"
+        path: "/api/v1/manage/fabrics/{{ item.FABRIC_NAME }}"
+        method: PUT
+        content: "{{ lookup('template', '../../templates/1.0-configure-nd-fabric-enhanced.j2') }}"
+      loop: "{{ enhanced_fabrics }}"
+      loop_control:
+        label: "{{ item.FABRIC_NAME }}"
+      when:
+        - enhanced_fabrics | length > 0
+        - item.FABRIC_NAME in (existing_enhanced_fabrics | default([]))
+      register: enhanced_update_result
+
+    - name: Display enhanced LAN fabric results
+      ansible.builtin.debug:
+        msg: |
+          Enhanced LAN fabric provisioning complete.
+          {% for result in enhanced_create_result.results | default([]) %}
+          {% if result.skipped is not defined or not result.skipped %}
+          - {{ result.item.FABRIC_NAME }}: {{ 'CREATED' if not result.failed | default(false) else 'FAILED (create)' }}
+          {% endif %}
+          {% endfor %}
+          {% for result in enhanced_update_result.results | default([]) %}
+          {% if result.skipped is not defined or not result.skipped %}
+          - {{ result.item.FABRIC_NAME }}: {{ 'UPDATED' if not result.failed | default(false) else 'FAILED (update)' }}
+          {% endif %}
+          {% endfor %}
+      when: enhanced_fabrics | length > 0
+
+    #--------------------------------------------------------------------------
+    # Standard fabrics: create/update via dcnm_fabric module
+    #--------------------------------------------------------------------------
+    - name: Build normalized fabric config list for dcnm_fabric
+      ansible.builtin.set_fact:
+        dcnm_fabrics_config: "{{ (dcnm_fabrics_config | default([])) + [ item | combine({'FABRIC_TYPE': (fabric_type_map[item.FABRIC_TYPE | default('LAN_CLASSIC') | lower] | default(item.FABRIC_TYPE | default('LAN_CLASSIC') | upper))}) ] }}"
+      loop: "{{ standard_fabrics }}"
+      loop_control:
+        label: "{{ item.FABRIC_NAME }}"
+      when: standard_fabrics | length > 0
+
+    - name: Display standard fabrics to be merged
+      ansible.builtin.debug:
+        msg: |
+          Standard fabrics to be merged: {{ dcnm_fabrics_config | default([]) | length }}
+          {% for fabric in dcnm_fabrics_config | default([]) %}
+          - {{ fabric.FABRIC_NAME }} ({{ fabric.FABRIC_TYPE }})
+          {% endfor %}
+      when: standard_fabrics | length > 0
+
+    - name: Configure standard fabrics in Nexus Dashboard via dcnm_fabric
+      cisco.dcnm.dcnm_fabric:
+        state: merged
+        skip_validation: true
+        config: "{{ dcnm_fabrics_config }}"
+      vars:
+        ansible_network_os: cisco.dcnm.dcnm
+      when:
+        - dcnm_fabrics_config is defined
+        - dcnm_fabrics_config | length > 0
+      register: fabric_config_result
+
+    - name: Display standard fabric configuration results
+      ansible.builtin.debug:
+        msg: |
+          Standard fabric configuration complete.
+          Changed: {{ fabric_config_result.changed | default(false) }}
+          Response entries: {{ fabric_config_result.response | default([]) | length }}
+      when: fabric_config_result is defined

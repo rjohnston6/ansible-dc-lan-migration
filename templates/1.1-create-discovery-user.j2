@@ -1,42 +1,50 @@
 {#
 ================================================================================
-Template: Discovery User Policy Bulk Create (JSON Payload)
+Template: Discovery User setCredential Payload
 ================================================================================
 Purpose:
-  Generate JSON payload for the NDFC REST API to create a discovery user
-  (switch_user) policy for NDFC to authenticate to switches.
+  Generate JSON payload for the NDFC lan-discovery setCredential API to
+  configure NDFC switch discovery credentials in bulk.
 
 API Endpoint:
-  POST /appcenter/cisco/ndfc/api/v1/lan-fabric/rest/control/policies/bulk-create
+  POST /appcenter/cisco/ndfc/api/v1/lan-discovery/setCredential
 
 Input Variables:
-  serial_number              - Target switch serial number
+  setcredential_switches     - List of dicts: {ipAddress, model, serialNumber, sysName}
+  seed_ips                   - Comma-separated string of switch management IPs
   discovery_username         - Username for NDFC switch discovery
   discovery_password         - Password for NDFC switch discovery
 
-Key Settings:
-  entityName: SWITCH         - Policy applies to a switch
-  entityType: SWITCH         - Entity type
-  templateName: switch_user  - NDFC template for switch user credentials
-  priority: 500              - Policy priority
-
 Notes:
-  - This user is used by NDFC to authenticate to switches during discovery
+  - Single call sets credentials for all switches at once
   - Credentials should be stored in Ansible vault for security
-  - One policy per switch serial number
 ================================================================================
 #}
 {
-  "nvPairs": {
-    "USERNAME": "{{ discovery_username }}",
-    "PASSWORD": "{{ discovery_password }}",
-    "ROLE": "network-admin"
-  },
-  "entityName": "SWITCH",
-  "entityType": "SWITCH",
-  "source": "",
-  "priority": 500,
-  "description": "NDFC discovery user for switch authentication",
-  "templateName": "switch_user",
-  "serialNumber": "{{ serial_number }}"
+  "enablePwd": "",
+  "groupId": 0,
+  "maxHop": 0,
+  "platform": "",
+  "seed": "{{ seed_ips }}",
+  "switches": [
+{% for sw in setcredential_switches %}
+    {
+      "globalDevId": "",
+      "ipAddress": "{{ sw.ipAddress }}",
+      "model": "{{ sw.model }}",
+      "serialNumber": "{{ sw.serialNumber }}",
+      "sysName": "{{ sw.sysName }}",
+      "vdcMac": ""
+    }{% if not loop.last %},{% endif %}
+
+{% endfor %}
+  ],
+  "timeout": 0,
+  "userCredential": {
+    "username": "{{ discovery_username }}",
+    "v2Community": "",
+    "v3": true,
+    "v3Password": "{{ discovery_password }}",
+    "v3Protocol": "MD5"
+  }
 }
