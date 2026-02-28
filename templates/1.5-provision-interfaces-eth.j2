@@ -39,11 +39,12 @@ Port-channel Members:
   {% set switch_name = switch.inventory_hostname %}
   {% if switch_name in l2_interfaces_lookup %}
     {% set switch_ip = hostvars[switch_name]['ansible_host'] %}
-    {# --- Standard Ethernet interfaces (including port-channel members) --- #}
+    {# --- Standard Ethernet interfaces (excluding port-channel members - NDFC manages member config via the port-channel) --- #}
     {% set eth_interfaces = l2_interfaces_lookup[switch_name].interfaces | selectattr('type', 'equalto', 'eth') | list %}
     {% for iface in eth_interfaces %}
-      {# Only process interfaces that have explicit mode configuration #}
-      {% if iface.mode is defined %}
+      {# Skip port-channel members - their L2 config is inherited from the PC in NDFC #}
+      {# Skip interfaces with no explicit mode (e.g. unconfigured/admin-down only ports) #}
+      {% if iface.mode is defined and iface.channel_group is not defined %}
       {% set iface_name = iface.name | regex_replace('^Ethernet', 'eth') %}
       {% set iface_config = {
         'name': iface_name,
