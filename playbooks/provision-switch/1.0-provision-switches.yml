@@ -540,6 +540,14 @@
     # /inventory/discover with selectable=false, NDFC returns a response with
     # no DATA field, and the dcnm_inventory failure() method crashes with
     # NoneType.get(). Skip these switches entirely — they are already managed.
+    #
+    # cisco.dcnm.dcnm_rest is used here instead of cisco.nd.nd_rest because:
+    # - cisco.nd.nd_rest returns 403 Forbidden on NDFC LAN Fabric REST endpoints
+    #   when called via the ND httpapi connection plugin.
+    # - cisco.dcnm.dcnm_rest routes requests through the DCNM/NDFC httpapi plugin,
+    #   which handles NDFC-specific authentication and produces a 200 response.
+    # - Response shape differs: dcnm_rest returns result.response.DATA (dict),
+    #   whereas nd_rest returns result.json.DATA directly.
     - name: Query NDFC for already-managed switches per fabric
       cisco.dcnm.dcnm_rest:
         method: GET
