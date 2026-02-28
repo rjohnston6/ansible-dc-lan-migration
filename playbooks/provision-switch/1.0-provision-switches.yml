@@ -535,6 +535,62 @@
         - discover-switches
         - assign-roles
 
+    # Filter already-managed switches from discovery payloads.
+    # When a switch is already managed in NDFC, dcnm_inventory POSTs to
+    # /inventory/discover with selectable=false, NDFC returns a response with
+    # no DATA field, and the dcnm_inventory failure() method crashes with
+    # NoneType.get(). Skip these switches entirely — they are already managed.
+    - name: Query NDFC for already-managed switches per fabric
+      cisco.dcnm.dcnm_rest:
+        method: GET
+        path: "/appcenter/cisco/ndfc/api/v1/lan-fabric/rest/control/fabrics/{{ item }}/inventory/switchesByFabric"
+      vars:
+        ansible_network_os: cisco.dcnm.dcnm
+      loop: "{{ discovery_payloads | default([]) | map(attribute='fabric') | unique | list }}"
+      loop_control:
+        label: "{{ item }}"
+      register: ndfc_managed_switches_raw
+      when: discovery_payloads is defined and discovery_payloads | length > 0
+      tags:
+        - discover-switches
+        - assign-roles
+
+    - name: Build set of already-managed switch IPs
+      ansible.builtin.set_fact:
+        managed_switch_ips: |
+          {%- set ips = [] -%}
+          {%- for result in ndfc_managed_switches_raw.results | default([]) -%}
+            {%- if result.skipped is not defined and result.response is defined and result.response.DATA is defined -%}
+              {%- for sw in result.response.DATA | default([]) -%}
+                {%- if sw.ipAddress is defined -%}
+                  {%- set _ = ips.append(sw.ipAddress) -%}
+                {%- endif -%}
+              {%- endfor -%}
+            {%- endif -%}
+          {%- endfor -%}
+          {{ ips }}
+      when: ndfc_managed_switches_raw is defined
+      tags:
+        - discover-switches
+        - assign-roles
+
+    - name: Filter already-managed switches from discovery payloads
+      ansible.builtin.set_fact:
+        discovery_payloads: |
+          {%- set filtered = [] -%}
+          {%- for payload in discovery_payloads | default([]) -%}
+            {%- if payload.config[0].seed_ip not in (managed_switch_ips | default([])) -%}
+              {%- set _ = filtered.append(payload) -%}
+            {%- endif -%}
+          {%- endfor -%}
+          {{ filtered }}
+      when:
+        - discovery_payloads is defined
+        - managed_switch_ips is defined
+      tags:
+        - discover-switches
+        - assign-roles
+
     - name: Display switches to discover
       ansible.builtin.debug:
         msg: |
