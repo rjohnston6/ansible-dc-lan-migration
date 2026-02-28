@@ -212,31 +212,59 @@
       when: static_routes_filtered is defined
 
     # Configure static routes via NDFC API
-    - name: Configure default static routes on switches
-      cisco.nd.nd_rest:
-        host: "{{ ansible_host }}"
-        username: "{{ ansible_user }}"
-        password: "{{ ansible_ssh_pass }}"
-        use_ssl: "{{ ansible_httpapi_use_ssl }}"
-        validate_certs: "{{ ansible_httpapi_validate_certs }}"
-        use_proxy: "{{ ansible_httpapi_use_proxy }}"
-        login_domain: "{{ ansible_httpapi_login_domain }}"
-        path: "/appcenter/cisco/ndfc/api/v1/lan-fabric/rest/control/policies/bulk-create"
-        method: POST
-        content: "{{ lookup('template', '../../templates/1.7-provision-static-routes.j2') }}"
-      loop: "{{ static_routes_filtered }}"
-      loop_control:
-        label: "{{ item.hostname }}: {{ item.prefix }} via {{ item.next_hop }}"
-      vars:
-        serial_number: "{{ item.serial_number }}"
-        next_hop: "{{ item.next_hop }}"
-        prefix: "{{ item.prefix }}"
-        interface: "{{ item.interface | default('') }}"
-        vrf_name: "{{ item.vrf_name }}"
-        description: "{{ item.description }}"
+    # ========================================================================
+
+    - name: Build static route policy configs grouped by fabric for dcnm_policy
+      ansible.builtin.set_fact:
+        route_policy_by_fabric: |
+          {%- set by_fabric = {} -%}
+          {%- for route in static_routes_filtered | default([]) -%}
+            {%- set fabric = route.fabric_name -%}
+            {%- set ip = hostvars[route.hostname]['ansible_host'] -%}
+            {%- if fabric not in by_fabric -%}
+              {%- set _ = by_fabric.update({fabric: {}}) -%}
+            {%- endif -%}
+            {%- if ip not in by_fabric[fabric] -%}
+              {%- set _ = by_fabric[fabric].update({ip: []}) -%}
+            {%- endif -%}
+            {%- set static_routes_json = '{"staticRoutes":[{"IP_VERSION":"IPv4","ipv4Prefix":"' + route.prefix + '","ipv6Prefix":"","nextHop":"' + route.next_hop + '","interface":"' + (route.interface | default('')) + '","routePreference":"","nextHopName":"","tag":"","trackId":"","nextHopVrf":""}]}' -%}
+            {%- set _ = by_fabric[fabric][ip].append({
+              'name': 'static_route_v4_v6',
+              'create_additional_policy': true,
+              'policy_vars': {
+                'vrfName': route.vrf_name | default(''),
+                'staticRoutes': static_routes_json
+              }
+            }) -%}
+          {%- endfor -%}
+          {%- set result = {} -%}
+          {%- for fabric, switches in by_fabric.items() -%}
+            {%- set config = [{'switch': []}] -%}
+            {%- for ip, policies in switches.items() -%}
+              {%- set _ = config[0].switch.append({'ip': ip, 'policies': policies}) -%}
+            {%- endfor -%}
+            {%- set _ = result.update({fabric: config}) -%}
+          {%- endfor -%}
+          {{ result }}
       when:
         - static_routes_filtered is defined
         - static_routes_filtered | length > 0
+
+    # Configure static routes via dcnm_policy (avoids 403 on bulk-create with nd_rest)
+    - name: Configure default static routes on switches
+      cisco.dcnm.dcnm_policy:
+        fabric: "{{ item.key }}"
+        state: merged
+        deploy: false
+        config: "{{ item.value }}"
+      vars:
+        ansible_network_os: cisco.dcnm.dcnm
+      loop: "{{ route_policy_by_fabric | default({}) | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+      when:
+        - route_policy_by_fabric is defined
+        - route_policy_by_fabric | length > 0
       register: route_results
 
     - name: Display static route configuration results
@@ -245,14 +273,12 @@
           Static route configuration complete.
           Total routes found:        {{ static_routes | default([]) | length }}
           Already existed (skipped): {{ (static_routes | default([]) | length) - (static_routes_filtered | default([]) | length) }}
-          Newly configured:          {{ route_results.results | default([]) | rejectattr('skipped', 'defined') | list | length }}
-          {% set failed = route_results.results | default([]) | selectattr('failed', 'defined') | selectattr('failed', 'equalto', true) | list %}
-          Failed:                    {{ failed | length }}
+          Newly configured:          {{ static_routes_filtered | default([]) | length }}
+          {% for result in route_results.results | default([]) %}
+          {% if result.skipped is not defined or not result.skipped %}
+          {{ result.item.key }}: {{ 'SUCCESS' if (result.failed is not defined or not result.failed) else 'FAILED' }}
+          {% endif %}
+          {% endfor %}
           {% if static_routes | default([]) | length == 0 %}
           WARNING: No static routes were found. Verify static_routes.yml is populated and switches have add_to_fabric: true.
           {% endif %}
-          {% for result in route_results.results | default([]) %}
-          {% if result.skipped is not defined or not result.skipped %}
-          - {{ result.item.hostname }}: {{ result.item.prefix }} via {{ result.item.next_hop }}{% if result.item.interface %} ({{ result.item.interface }}){% endif %}: {{ 'SUCCESS' if result.failed is not defined or not result.failed else 'FAILED' }}
-          {% endif %}
-          {% endfor %}
